@@ -1,5 +1,5 @@
 import React from "react";
-import { RefreshCw, MapPin, Clock, Wifi } from "lucide-react";
+import { RefreshCw, MapPin, Clock, Wifi, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { getAQILevel } from "../utils/aqi-colors";
 import ShareButton from "./ShareButton";
 
@@ -148,17 +148,36 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
 
         {/* AQI value + category */}
         <div style={{ display: "flex", alignItems: "flex-end", gap: "20px", flexWrap: "wrap" }}>
-          {/* Big AQI number */}
+          {/* Big AQI number with trend */}
           <div style={{ textAlign: "center" }}>
-            <div style={{
-              fontSize:    "80px",
-              fontWeight:  "900",
-              lineHeight:  "1",
-              color:       level.color,
-              fontVariantNumeric: "tabular-nums"
-            }}>
-              {data.aqi ?? "–"}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
+              <div style={{
+                fontSize:    "80px",
+                fontWeight:  "900",
+                lineHeight:  "1",
+                color:       level.color,
+                fontVariantNumeric: "tabular-nums"
+              }}>
+                {data.aqi ?? "–"}
+              </div>
+              
+              {/* Trend indicator */}
+              {data.trend && data.trend !== "stable" && (
+                <div style={{ 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  alignItems: "center",
+                  marginLeft: "4px"
+                }}>
+                  {data.trend === "rising" ? (
+                    <TrendingUp size={28} color="#ef4444" strokeWidth={3} />
+                  ) : (
+                    <TrendingDown size={28} color="#10b981" strokeWidth={3} />
+                  )}
+                </div>
+              )}
             </div>
+            
             <div style={{
               fontSize:    "13px",
               color:       "var(--text-muted)",
@@ -166,6 +185,24 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
             }}>
               AQI (CPCB India)
             </div>
+            
+            {/* Trend text */}
+            {data.trend && data.trendPeriodHours > 0 && (
+              <div style={{
+                fontSize:   "11px",
+                color:      data.trend === "rising" ? "#ef4444" : 
+                           data.trend === "falling" ? "#10b981" : "var(--text-muted)",
+                marginTop:  "6px",
+                fontWeight: "600"
+              }}>
+                {data.trend === "rising" && "↑"} 
+                {data.trend === "falling" && "↓"}
+                {data.trend === "stable" && "→"}
+                {" "}
+                {data.trendDelta > 0 && "+"}
+                {data.trendDelta} pts in {data.trendPeriodHours}h
+              </div>
+            )}
           </div>
 
           {/* Category badge + health implication */}

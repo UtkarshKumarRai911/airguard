@@ -49,6 +49,9 @@ export function useAQI(initialLocation = null) {
           aqi:         data.aqi,
           category:    data.category,
           readings:    data.readings,
+          trend:       data.trend,
+          trendDelta:  data.trendDelta,
+          trendPeriodHours: data.trendPeriodHours,
           userProfile: userProfile || { groups: ["general"] }
         })
           .then(rec => setRecommendation(rec))

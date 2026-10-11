@@ -102,6 +102,38 @@ export default function AIAdvice({ data, loading, aqi }) {
       {expanded && (
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
 
+          {/* Forecast (if available) */}
+          {data.forecast && (
+            <div style={{
+              background:   "rgba(59,130,246,0.1)",
+              border:       "1px solid rgba(59,130,246,0.3)",
+              borderRadius: "8px",
+              padding:      "14px 16px",
+              display:      "flex",
+              alignItems:   "flex-start",
+              gap:          "12px"
+            }}>
+              <span style={{ fontSize: "20px", flexShrink: 0 }}>📈</span>
+              <div>
+                <p style={{ 
+                  fontSize: "13px", 
+                  fontWeight: "600", 
+                  color: "#60a5fa",
+                  marginBottom: "4px"
+                }}>
+                  Forecast (Next 2-3 Hours)
+                </p>
+                <p style={{ 
+                  fontSize: "13px", 
+                  color: "var(--text-primary)", 
+                  lineHeight: "1.6" 
+                }}>
+                  {data.forecast}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Outdoor safety banner */}
           <div style={{
             display:      "flex",

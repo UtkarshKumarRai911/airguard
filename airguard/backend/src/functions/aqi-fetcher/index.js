@@ -225,6 +225,46 @@ async function getHistory(locationKey) {
   }
 }
 
+// ── Trend Calculation ─────────────────────────────────────────────────────────
+
+async function getTrend(locationKey, currentAQI) {
+  try {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    
+    // Query history for reading ~3h ago
+    const items = await queryItems(
+      TABLES.AQI_CACHE,
+      "locationKey = :lk",
+      { ":lk": locationKey },
+      "LocationFetchedAtIndex"
+    );
+
+    // Find the reading closest to 3 hours ago
+    const older = items
+      .filter(h => h.fetchedAt < threeHoursAgo && h.aqi != null)
+      .sort((a, b) => new Date(b.fetchedAt) - new Date(a.fetchedAt))[0];
+
+    if (!older || !older.aqi) {
+      return { trend: "stable", trendDelta: 0, trendPeriodHours: 0 };
+    }
+
+    const delta = currentAQI - older.aqi;
+    const trend = delta > 30 ? "rising" : delta < -30 ? "falling" : "stable";
+    const periodHours = Math.round(
+      (Date.now() - new Date(older.fetchedAt).getTime()) / 3600000
+    );
+
+    return {
+      trend,
+      trendDelta: delta,
+      trendPeriodHours: periodHours
+    };
+  } catch (err) {
+    console.warn("Trend calculation failed:", err.message);
+    return { trend: "stable", trendDelta: 0, trendPeriodHours: 0 };
+  }
+}
+
 // ── Main Handler ──────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
@@ -273,7 +313,8 @@ exports.handler = async (event) => {
   const { fresh, stale } = await getCached(locationKey);
   if (fresh) {
     console.log(`Cache HIT (fresh) for: ${locationKey}`);
-    return success({ ...fresh, cached: true }, 200, origin);
+    const trendData = await getTrend(locationKey, fresh.aqi);
+    return success({ ...fresh, ...trendData, cached: true }, 200, origin);
   }
 
   let rawData = null;
@@ -317,7 +358,11 @@ exports.handler = async (event) => {
 
   // 5. Build structured response and cache it
   const structured = buildAQIResponse(rawData, location);
+  
+  // 6. Calculate trend from historical data
+  const trendData = await getTrend(locationKey, structured.aqi);
+  
   await setCache(locationKey, structured);
 
-  return success({ ...structured, cached: false }, 200, origin);
+  return success({ ...structured, ...trendData, cached: false }, 200, origin);
 };

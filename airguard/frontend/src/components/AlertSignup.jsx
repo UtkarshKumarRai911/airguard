@@ -12,15 +12,24 @@ const THRESHOLD_OPTIONS = [
 
 export default function AlertSignup({ location, userProfile }) {
   const [email,        setEmail]        = useState("");
+  const [phone,        setPhone]        = useState("");
+  const [alertChannel, setAlertChannel] = useState("email"); // "email" or "sms"
   const [threshold,    setThreshold]    = useState(150);
   const [subscribed,   setSubscribed]   = useState(false);
   const [loading,      setLoading]      = useState(false);
   const [showUnsub,    setShowUnsub]    = useState(false);
   const [emailError,   setEmailError]   = useState("");
+  const [phoneError,   setPhoneError]   = useState("");
 
   function validateEmail(val) {
     const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return re.test(val);
+  }
+
+  function validateIndianPhone(num) {
+    // Indian mobile: 10 digits starting with 6, 7, 8, or 9
+    const cleaned = num.replace(/[\s\-\(\)]/g, '');
+    return /^[6-9]\d{9}$/.test(cleaned);
   }
 
   function handleEmailChange(e) {
@@ -28,24 +37,39 @@ export default function AlertSignup({ location, userProfile }) {
     if (emailError) setEmailError("");
   }
 
+  function handlePhoneChange(e) {
+    setPhone(e.target.value);
+    if (phoneError) setPhoneError("");
+  }
+
   async function handleSubscribe(e) {
     e.preventDefault();
 
-    if (!validateEmail(email)) {
-      setEmailError("Please enter a valid email address");
-      return;
+    // Validate based on selected channel
+    if (alertChannel === "email") {
+      if (!validateEmail(email)) {
+        setEmailError("Please enter a valid email address");
+        return;
+      }
+    } else {
+      if (!validateIndianPhone(phone)) {
+        setPhoneError("Please enter a valid 10-digit Indian mobile number");
+        return;
+      }
     }
 
     setLoading(true);
     try {
       await subscribe({
-        email,
+        email:       alertChannel === "email" ? email : undefined,
+        phone:       alertChannel === "sms" ? phone.replace(/[\s\-\(\)]/g, '') : undefined,
+        alertChannel,
         location,
         threshold,
         userProfile: userProfile || { groups: ["general"] }
       });
       setSubscribed(true);
-      toast.success(`Alerts enabled for ${location}! Check your inbox.`);
+      toast.success(`Alerts enabled for ${location}! Check your ${alertChannel === "email" ? "inbox" : "phone"}.`);
     } catch (err) {
       toast.error(err.message || "Failed to subscribe. Please try again.");
     } finally {
@@ -56,7 +80,8 @@ export default function AlertSignup({ location, userProfile }) {
   async function handleUnsubscribe() {
     setLoading(true);
     try {
-      await unsubscribe(email, location);
+      const identifier = alertChannel === "email" ? email : phone;
+      await unsubscribe(identifier, location);
       setSubscribed(false);
       setShowUnsub(false);
       toast.success("Unsubscribed successfully.");
@@ -68,6 +93,9 @@ export default function AlertSignup({ location, userProfile }) {
   }
 
   if (subscribed) {
+    const displayIdentifier = alertChannel === "email" ? email : `+91 ${phone}`;
+    const channelName = alertChannel === "email" ? "email" : "SMS";
+    
     return (
       <div
         className="fade-in"
@@ -83,10 +111,10 @@ export default function AlertSignup({ location, userProfile }) {
             <CheckCircle size={20} color="#10b981" />
             <div>
               <p style={{ fontSize: "15px", fontWeight: "600", color: "#10b981" }}>
-                Alerts activated for {location}
+                {channelName} alerts activated for {location}
               </p>
               <p style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px" }}>
-                You'll receive an email at <strong>{email}</strong> when AQI exceeds {threshold}
+                You'll receive alerts at <strong>{displayIdentifier}</strong> when AQI exceeds {threshold}
               </p>
             </div>
           </div>
@@ -173,44 +201,155 @@ export default function AlertSignup({ location, userProfile }) {
       <form onSubmit={handleSubscribe} noValidate>
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
 
-          {/* Email input */}
+          {/* Channel selector */}
           <div>
-            <label htmlFor="alert-email" style={{
+            <label style={{
               display:      "block",
               fontSize:     "13px",
               color:        "var(--text-muted)",
-              marginBottom: "6px"
+              marginBottom: "8px"
             }}>
-              Email address
+              Alert me via
             </label>
-            <input
-              id="alert-email"
-              type="email"
-              value={email}
-              onChange={handleEmailChange}
-              placeholder="you@example.com"
-              required
-              aria-invalid={!!emailError}
-              aria-describedby={emailError ? "email-error" : undefined}
-              style={{
-                width:        "100%",
-                background:   "var(--bg-primary)",
-                border:       `1px solid ${emailError ? "#ef4444" : "var(--border)"}`,
-                borderRadius: "8px",
-                padding:      "10px 14px",
-                color:        "var(--text-primary)",
-                fontSize:     "14px",
-                outline:      "none"
-              }}
-            />
-            {emailError && (
-              <p id="email-error" role="alert" style={{
-                fontSize: "12px", color: "#ef4444", marginTop: "4px"
-              }}>
-                {emailError}
-              </p>
-            )}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                type="button"
+                onClick={() => setAlertChannel("email")}
+                style={{
+                  flex:         1,
+                  background:   alertChannel === "email" ? "var(--accent-green)" : "var(--bg-primary)",
+                  border:       `1px solid ${alertChannel === "email" ? "var(--accent-green)" : "var(--border)"}`,
+                  borderRadius: "8px",
+                  padding:      "10px 14px",
+                  color:        alertChannel === "email" ? "#000" : "var(--text-muted)",
+                  fontWeight:   alertChannel === "email" ? "600" : "400",
+                  fontSize:     "14px",
+                  cursor:       "pointer",
+                  transition:   "all 0.2s"
+                }}
+              >
+                📧 Email
+              </button>
+              <button
+                type="button"
+                onClick={() => setAlertChannel("sms")}
+                style={{
+                  flex:         1,
+                  background:   alertChannel === "sms" ? "var(--accent-green)" : "var(--bg-primary)",
+                  border:       `1px solid ${alertChannel === "sms" ? "var(--accent-green)" : "var(--border)"}`,
+                  borderRadius: "8px",
+                  padding:      "10px 14px",
+                  color:        alertChannel === "sms" ? "#000" : "var(--text-muted)",
+                  fontWeight:   alertChannel === "sms" ? "600" : "400",
+                  fontSize:     "14px",
+                  cursor:       "pointer",
+                  transition:   "all 0.2s"
+                }}
+              >
+                📱 SMS
+              </button>
+            </div>
           </div>
+
+          {/* Email input (shown when email selected) */}
+          {alertChannel === "email" && (
+            <div>
+              <label htmlFor="alert-email" style={{
+                display:      "block",
+                fontSize:     "13px",
+                color:        "var(--text-muted)",
+                marginBottom: "6px"
+              }}>
+                Email address
+              </label>
+              <input
+                id="alert-email"
+                type="email"
+                value={email}
+                onChange={handleEmailChange}
+                placeholder="you@example.com"
+                required
+                aria-invalid={!!emailError}
+                aria-describedby={emailError ? "email-error" : undefined}
+                style={{
+                  width:        "100%",
+                  background:   "var(--bg-primary)",
+                  border:       `1px solid ${emailError ? "#ef4444" : "var(--border)"}`,
+                  borderRadius: "8px",
+                  padding:      "10px 14px",
+                  color:        "var(--text-primary)",
+                  fontSize:     "14px",
+                  outline:      "none"
+                }}
+              />
+              {emailError && (
+                <p id="email-error" role="alert" style={{
+                  fontSize: "12px", color: "#ef4444", marginTop: "4px"
+                }}>
+                  {emailError}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Phone input (shown when SMS selected) */}
+          {alertChannel === "sms" && (
+            <div>
+              <label htmlFor="alert-phone" style={{
+                display:      "block",
+                fontSize:     "13px",
+                color:        "var(--text-muted)",
+                marginBottom: "6px"
+              }}>
+                Mobile number (India)
+              </label>
+              <div style={{ position: "relative" }}>
+                <span style={{
+                  position:   "absolute",
+                  left:       "14px",
+                  top:        "50%",
+                  transform:  "translateY(-50%)",
+                  fontSize:   "14px",
+                  color:      "var(--text-muted)",
+                  fontWeight: "600"
+                }}>
+                  +91
+                </span>
+                <input
+                  id="alert-phone"
+                  type="tel"
+                  value={phone}
+                  onChange={handlePhoneChange}
+                  placeholder="9876543210"
+                  required
+                  pattern="[6-9][0-9]{9}"
+                  maxLength="10"
+                  aria-invalid={!!phoneError}
+                  aria-describedby={phoneError ? "phone-error" : undefined}
+                  style={{
+                    width:        "100%",
+                    background:   "var(--bg-primary)",
+                    border:       `1px solid ${phoneError ? "#ef4444" : "var(--border)"}`,
+                    borderRadius: "8px",
+                    padding:      "10px 14px 10px 48px",
+                    color:        "var(--text-primary)",
+                    fontSize:     "14px",
+                    outline:      "none"
+                  }}
+                />
+              </div>
+              {phoneError && (
+                <p id="phone-error" role="alert" style={{
+                  fontSize: "12px", color: "#ef4444", marginTop: "4px"
+                }}>
+                  {phoneError}
+                </p>
+              )}
+              <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                SMS works on any phone, no internet needed. Costs ₹0.16 per message.
+              </p>
+            </div>
+          )}
 
           {/* Threshold selector */}
           <div>
@@ -247,7 +386,7 @@ export default function AlertSignup({ location, userProfile }) {
           {/* Submit */}
           <button
             type="submit"
-            disabled={loading || !email}
+            disabled={loading || (alertChannel === "email" ? !email : !phone)}
             style={{
               background:    loading ? "var(--border)" : "var(--accent-green)",
               border:        "none",
@@ -256,23 +395,26 @@ export default function AlertSignup({ location, userProfile }) {
               color:         "#000",
               fontWeight:    "600",
               fontSize:      "14px",
-              cursor:        loading || !email ? "not-allowed" : "pointer",
+              cursor:        loading || (alertChannel === "email" ? !email : !phone) ? "not-allowed" : "pointer",
               display:       "flex",
               alignItems:    "center",
               justifyContent: "center",
               gap:           "8px",
-              opacity:       !email ? 0.5 : 1,
+              opacity:       (alertChannel === "email" ? !email : !phone) ? 0.5 : 1,
               transition:    "background 0.2s, opacity 0.2s"
             }}
           >
             {loading
               ? <><Loader size={14} className="spinning" /> Setting up alerts…</>
-              : <><Bell size={14} /> Enable Alerts</>
+              : <><Bell size={14} /> Enable {alertChannel === "email" ? "Email" : "SMS"} Alerts</>
             }
           </button>
 
           <p style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center" }}>
-            You'll also receive a daily 7 AM summary. Alerts powered by AWS SNS.
+            {alertChannel === "email" 
+              ? "You'll also receive a daily 7 AM summary. Alerts powered by AWS SNS."
+              : "SMS alerts work on any phone without internet. Daily summary also available."
+            }
           </p>
         </div>
       </form>

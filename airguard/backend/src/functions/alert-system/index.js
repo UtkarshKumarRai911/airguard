@@ -139,7 +139,85 @@ function buildAlertEmailHTML(subscription, aqiData, alertType) {
 </html>`;
 }
 
+// ── SMS Templates ─────────────────────────────────────────────────────────────
+
+function buildSMSText(aqiData, alertType) {
+  const category = getAQICategory(aqiData.aqi);
+  const lines = [];
+
+  // Header
+  if (alertType === "daily_summary") {
+    lines.push(`AirGuard Daily Summary`);
+  } else {
+    lines.push(`⚠️ AirGuard Alert`);
+  }
+
+  // Core info
+  lines.push(`${aqiData.location}: AQI ${aqiData.aqi} (${category.label})`);
+
+  // Advice
+  if (aqiData.aqi >= 300) {
+    lines.push(`School: NO outdoor activities`);
+    lines.push(`Mask: N95 mandatory`);
+  } else if (aqiData.aqi >= 200) {
+    lines.push(`School: Limit outdoor time`);
+    lines.push(`Mask: N95 recommended`);
+  } else if (aqiData.aqi >= 150) {
+    lines.push(`School: Monitor sensitive children`);
+    lines.push(`Mask: Recommended for vulnerable`);
+  } else {
+    lines.push(`Conditions acceptable for most`);
+  }
+
+  // Footer
+  lines.push(`Reply STOP to unsubscribe`);
+
+  return lines.join('\n');
+}
+
 // ── SNS Publisher ─────────────────────────────────────────────────────────────
+
+async function sendAlert(subscription, aqiData, alertType) {
+  if (!subscription.alertChannel) {
+    // Legacy: default to email for old subscriptions
+    subscription.alertChannel = "email";
+  }
+
+  if (subscription.alertChannel === "sms") {
+    // SMS path
+    return sendAlertSMS(subscription, aqiData, alertType);
+  } else {
+    // Email path
+    return sendAlertEmail(subscription, aqiData, alertType);
+  }
+}
+
+async function sendAlertSMS(subscription, aqiData, alertType) {
+  if (!subscription.phone) {
+    console.warn("SMS channel selected but no phone number");
+    return false;
+  }
+
+  const message = buildSMSText(aqiData, alertType);
+
+  await snsClient.send(new PublishCommand({
+    PhoneNumber: `+91${subscription.phone}`,
+    Message: message,
+    MessageAttributes: {
+      'AWS.SNS.SMS.SMSType': {
+        DataType: 'String',
+        StringValue: 'Transactional' // Priority delivery
+      },
+      'AWS.SNS.SMS.SenderID': {
+        DataType: 'String',
+        StringValue: 'AirGuard' // Shown as sender name (if supported by carrier)
+      }
+    }
+  }));
+
+  console.log(`SMS sent to +91${subscription.phone} for ${aqiData.location}`);
+  return true;
+}
 
 async function sendAlertEmail(subscription, aqiData, alertType) {
   if (!SNS_TOPIC_ARN) {
@@ -179,20 +257,42 @@ function validateEmail(email) {
   return re.test(String(email).toLowerCase());
 }
 
-async function handleSubscribe(body, origin) {
-  const { email, location, threshold, userProfile } = body;
+function validateIndianPhone(phone) {
+  // Indian mobile: 10 digits starting with 6, 7, 8, or 9
+  const cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
+  return /^[6-9]\d{9}$/.test(cleaned);
+}
 
-  if (!email || !validateEmail(email)) {
-    return error("Valid email address is required", 400, origin);
+async function handleSubscribe(body, origin) {
+  const { email, phone, alertChannel, location, threshold, userProfile } = body;
+
+  // Determine channel and validate
+  const channel = alertChannel || (email ? "email" : phone ? "sms" : null);
+  
+  if (!channel || (channel !== "email" && channel !== "sms")) {
+    return error("alertChannel must be 'email' or 'sms'", 400, origin);
   }
+
+  let identifier;
+  if (channel === "email") {
+    if (!email || !validateEmail(email)) {
+      return error("Valid email address is required", 400, origin);
+    }
+    identifier = email.toLowerCase().trim();
+  } else {
+    if (!phone || !validateIndianPhone(phone)) {
+      return error("Valid 10-digit Indian mobile number is required", 400, origin);
+    }
+    identifier = String(phone).replace(/[\s\-\(\)]/g, '');
+  }
+
   if (!location || typeof location !== "string" || location.trim().length < 2) {
     return error("Valid location is required", 400, origin);
   }
 
-  const cleanEmail = email.toLowerCase().trim();
   const cleanLocation = location.trim().substring(0, 100);
   const alertThreshold = Math.min(500, Math.max(50, parseInt(threshold || "150", 10)));
-  const subscriptionId = `${cleanEmail}#${cleanLocation.toLowerCase().replace(/\s+/g, "-")}`;
+  const subscriptionId = `${channel}:${identifier}#${cleanLocation.toLowerCase().replace(/\s+/g, "-")}`;
 
   // Check if already subscribed
   const existing = await getItem(TABLES.SUBSCRIPTIONS, { subscriptionId });
@@ -205,7 +305,9 @@ async function handleSubscribe(body, origin) {
 
   const subscription = {
     subscriptionId,
-    email:        cleanEmail,
+    email:        channel === "email" ? identifier : null,
+    phone:        channel === "sms" ? identifier : null,
+    alertChannel: channel,
     location:     cleanLocation,
     locationKey:  cleanLocation.toLowerCase().replace(/\s+/g, "-"),
     threshold:    alertThreshold,
@@ -218,26 +320,41 @@ async function handleSubscribe(body, origin) {
 
   await putItem(TABLES.SUBSCRIPTIONS, subscription);
 
-  console.log(`New subscription: ${cleanEmail} → ${cleanLocation} (threshold: ${alertThreshold})`);
+  console.log(`New subscription: ${channel}:${identifier} → ${cleanLocation} (threshold: ${alertThreshold})`);
 
   return success({
-    message: `Subscribed! You'll receive alerts when AQI in ${cleanLocation} exceeds ${alertThreshold}.`,
+    message: `Subscribed! You'll receive ${channel === "email" ? "email" : "SMS"} alerts when AQI in ${cleanLocation} exceeds ${alertThreshold}.`,
     subscriptionId,
-    threshold: alertThreshold
+    threshold: alertThreshold,
+    channel
   }, 201, origin);
 }
 
 async function handleUnsubscribe(body, origin) {
-  const { email, location } = body;
+  const { email, phone, location } = body;
 
-  if (!email || !validateEmail(email)) {
-    return error("Valid email address is required", 400, origin);
+  let identifier, channel;
+  if (email) {
+    if (!validateEmail(email)) {
+      return error("Valid email address is required", 400, origin);
+    }
+    identifier = email.toLowerCase().trim();
+    channel = "email";
+  } else if (phone) {
+    if (!validateIndianPhone(phone)) {
+      return error("Valid phone number is required", 400, origin);
+    }
+    identifier = String(phone).replace(/[\s\-\(\)]/g, '');
+    channel = "sms";
+  } else {
+    return error("Email or phone number is required", 400, origin);
   }
+
   if (!location || typeof location !== "string") {
     return error("location is required", 400, origin);
   }
 
-  const subscriptionId = `${email.toLowerCase().trim()}#${location.trim().toLowerCase().replace(/\s+/g, "-")}`;
+  const subscriptionId = `${channel}:${identifier}#${location.trim().toLowerCase().replace(/\s+/g, "-")}`;
 
   const existing = await getItem(TABLES.SUBSCRIPTIONS, { subscriptionId });
   if (!existing) {
@@ -334,7 +451,7 @@ async function processAQIUpdate(aqiData) {
         continue;
       }
 
-      await sendAlertEmail(sub, aqiData, alertType);
+      await sendAlert(sub, aqiData, alertType);
 
       // Update subscription record
       await updateItem(TABLES.SUBSCRIPTIONS, { subscriptionId: sub.subscriptionId }, {
@@ -345,13 +462,15 @@ async function processAQIUpdate(aqiData) {
 
       // Log the alert
       await putItem(TABLES.ALERTS_LOG, {
-        alertId:    `${sub.subscriptionId}#${Date.now()}`,
-        email:      sub.email,
-        location:   aqiData.location,
-        aqi:        aqiData.aqi,
+        alertId:      `${sub.subscriptionId}#${Date.now()}`,
+        email:        sub.email,
+        phone:        sub.phone,
+        alertChannel: sub.alertChannel,
+        location:     aqiData.location,
+        aqi:          aqiData.aqi,
         alertType,
-        sentAt:     new Date().toISOString(),
-        ttl:        Math.floor(Date.now() / 1000) + 2592000 // 30 days
+        sentAt:       new Date().toISOString(),
+        ttl:          Math.floor(Date.now() / 1000) + 2592000 // 30 days
       });
 
       sent++;
