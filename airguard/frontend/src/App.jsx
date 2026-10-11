@@ -32,33 +32,45 @@ export default function App() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--bg-primary)" }}>
+    <div style={{ minHeight: "100vh" }}>
       <Header
         onOpenProfile={() => setShowProfileModal(true)}
         userProfile={userProfile}
       />
 
-      <main style={{ maxWidth: "900px", margin: "0 auto", padding: "24px 16px 64px" }}>
+      <main style={{ 
+        maxWidth: "1000px", 
+        margin: "0 auto", 
+        padding: "32px 20px 80px",
+      }}>
 
         {/* Search */}
-        <SearchBar
-          onSearch={handleSearch}
-          loading={loading}
-          currentLocation={location}
-        />
+        <div className="fade-in">
+          <SearchBar
+            onSearch={handleSearch}
+            loading={loading}
+            currentLocation={location}
+          />
+        </div>
 
         {/* Error */}
         {error && !loading && (
-          <div role="alert" style={{
-            marginTop: "16px",
-            padding: "14px 18px",
-            background: "#2d1515",
-            border: "1px solid #7f1d1d",
+          <div role="alert" className="slide-in-left" style={{
+            marginTop: "20px",
+            padding: "16px 20px",
+            background: "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.15) 100%)",
+            border: "2px solid rgba(239,68,68,0.4)",
             borderRadius: "var(--radius)",
             color: "#fca5a5",
-            fontSize: "14px"
+            fontSize: "14px",
+            fontWeight: "500",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            boxShadow: "0 4px 16px rgba(239,68,68,0.2)"
           }}>
-            ⚠️ {error}
+            <span style={{ fontSize: "18px" }}>⚠️</span>
+            <span>{error}</span>
           </div>
         )}
 
@@ -66,11 +78,13 @@ export default function App() {
         {!location && !loading && <EmptyState onCitySelect={handleSearch} />}
 
         {(loading || aqiData) && (
-          <div style={{ marginTop: "24px", display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ marginTop: "28px", display: "flex", flexDirection: "column", gap: "24px" }}>
 
             {/* India Context Banner */}
             {aqiData && !loading && (
-              <IndiaContextBanner aqi={aqiData.aqi} location={location} />
+              <div className="slide-in-right">
+                <IndiaContextBanner aqi={aqiData.aqi} location={location} />
+              </div>
             )}
 
             {/* AQI Card */}
@@ -83,67 +97,189 @@ export default function App() {
 
             {/* Pollutant breakdown */}
             {aqiData && !loading && (
-              <PollutantGrid readings={aqiData.readings} />
+              <div className="fade-in" style={{ animationDelay: "0.1s" }}>
+                <PollutantGrid readings={aqiData.readings} />
+              </div>
             )}
 
             {/* AI Advice */}
             {(aqiData || aiLoading) && (
-              <AIAdvice
-                data={recommendation}
-                loading={aiLoading}
-                aqi={aqiData?.aqi}
-              />
+              <div className="fade-in" style={{ animationDelay: "0.2s" }}>
+                <AIAdvice
+                  data={recommendation}
+                  loading={aiLoading}
+                  aqi={aqiData?.aqi}
+                />
+              </div>
             )}
 
-            {/* 24h History Chart */}
+            {/* 7-day History Chart */}
             {(history.length > 0 || historyLoading) && (
-              <HistoryChart
-                data={history}
-                loading={historyLoading}
-                location={location}
-              />
+              <div className="fade-in" style={{ animationDelay: "0.3s" }}>
+                <HistoryChart
+                  data={history}
+                  loading={historyLoading}
+                  location={location}
+                />
+              </div>
             )}
 
             {/* Alert Signup */}
             {aqiData && !loading && (
-              <AlertSignup
-                location={location}
-                userProfile={userProfile}
-              />
+              <div className="fade-in" style={{ animationDelay: "0.4s" }}>
+                <AlertSignup
+                  location={location}
+                  userProfile={userProfile}
+                />
+              </div>
             )}
           </div>
         )}
       </main>
 
-      {/* Footer */}
+      {/* Footer with gradient */}
       <footer style={{
-        borderTop:    "1px solid var(--border)",
-        padding:      "20px 16px",
-        marginTop:    "40px",
+        borderTop:    "1px solid rgba(148,163,184,0.15)",
+        padding:      "32px 20px",
+        marginTop:    "60px",
         textAlign:    "center",
-        background:   "var(--bg-secondary)"
+        background:   "linear-gradient(180deg, rgba(15,23,42,0.5) 0%, rgba(10,14,39,0.9) 100%)",
+        backdropFilter: "blur(10px)",
+        position: "relative"
       }}>
-        <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "8px" }}>
-          Built for <strong style={{ color: "var(--text-primary)" }}>WeMakeDevs × AWS Environmental Hacks 2026</strong>
-        </p>
-        <p style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px" }}>
-          Team: <strong style={{ color: "#10b981" }}>FUTURE_PROTECTOR</strong> | Track: Air
-        </p>
+        {/* Decorative gradient orbs */}
         <div style={{
-          display:        "flex",
-          alignItems:     "center",
-          justifyContent: "center",
-          gap:            "12px",
-          fontSize:       "12px",
-          color:          "var(--text-muted)",
-          flexWrap:       "wrap"
-        }}>
-          <span style={{ color: "#ff9900", fontWeight: "600" }}>AWS Services:</span>
-          Lambda · Bedrock · DynamoDB · SNS · API Gateway · Amplify · EventBridge
+          position: "absolute",
+          top: "-100px",
+          left: "10%",
+          width: "200px",
+          height: "200px",
+          background: "radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%)",
+          borderRadius: "50%",
+          filter: "blur(40px)",
+          pointerEvents: "none"
+        }} />
+        <div style={{
+          position: "absolute",
+          top: "-80px",
+          right: "15%",
+          width: "180px",
+          height: "180px",
+          background: "radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%)",
+          borderRadius: "50%",
+          filter: "blur(40px)",
+          pointerEvents: "none"
+        }} />
+        
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <div style={{
+            display: "inline-block",
+            marginBottom: "16px",
+            padding: "10px 20px",
+            background: "linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(6,182,212,0.15) 100%)",
+            border: "2px solid rgba(16,185,129,0.3)",
+            borderRadius: "12px",
+            boxShadow: "0 4px 16px rgba(16,185,129,0.2)"
+          }}>
+            <p style={{ 
+              fontSize: "14px", 
+              fontWeight: "700",
+              margin: 0
+            }}>
+              <span className="gradient-text">WeMakeDevs × AWS Environmental Hacks 2026</span>
+            </p>
+          </div>
+          
+          <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "16px" }}>
+            Team: <strong style={{ 
+              background: "linear-gradient(135deg, #10b981 0%, #34d399 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+              fontWeight: "800"
+            }}>FUTURE_PROTECTOR</strong> | Track: Air Quality & Environmental Health
+          </p>
+          
+          <div style={{
+            display:        "flex",
+            alignItems:     "center",
+            justifyContent: "center",
+            gap:            "10px",
+            fontSize:       "13px",
+            color:          "var(--text-dim)",
+            flexWrap:       "wrap",
+            marginBottom: "16px"
+          }}>
+            <span style={{ 
+              color: "#ff9900", 
+              fontWeight: "700",
+              fontSize: "14px"
+            }}>Powered by AWS:</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(255,153,0,0.1)",
+              border: "1px solid rgba(255,153,0,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>Lambda</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(168,85,247,0.1)",
+              border: "1px solid rgba(168,85,247,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>Bedrock AI</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(59,130,246,0.1)",
+              border: "1px solid rgba(59,130,246,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>DynamoDB</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(16,185,129,0.1)",
+              border: "1px solid rgba(16,185,129,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>API Gateway</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(249,115,22,0.1)",
+              border: "1px solid rgba(249,115,22,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>SNS</span>
+            <span style={{
+              padding: "4px 10px",
+              background: "rgba(236,72,153,0.1)",
+              border: "1px solid rgba(236,72,153,0.3)",
+              borderRadius: "6px",
+              fontSize: "11px",
+              fontWeight: "600"
+            }}>Amplify</span>
+          </div>
+          
+          <p style={{ fontSize: "12px", color: "var(--text-dim)", marginTop: "12px" }}>
+            Real-time data from <strong style={{ color: "#34d399" }}>WAQI</strong> & <strong style={{ color: "#34d399" }}>OpenAQ</strong> | 
+            Using CPCB India AQI scale
+          </p>
+          
+          <div style={{
+            marginTop: "20px",
+            paddingTop: "16px",
+            borderTop: "1px solid rgba(148,163,184,0.1)"
+          }}>
+            <p style={{ fontSize: "11px", color: "var(--text-dim)" }}>
+              © 2026 AirGuard • Built with 💚 for cleaner air in India
+            </p>
+          </div>
         </div>
-        <p style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "12px" }}>
-          Data from WAQI & OpenAQ | Using CPCB India AQI scale
-        </p>
       </footer>
 
       {/* User profile modal */}
