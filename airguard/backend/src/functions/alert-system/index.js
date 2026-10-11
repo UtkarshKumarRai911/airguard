@@ -16,13 +16,15 @@
  *   - Cooldown: no repeat alerts within 3 hours for same location
  */
 
-const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");
+const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");  // Keep SNS for SMS
 const { getAQICategory } = require("/opt/nodejs/utils/aqi-utils");
 const { success, error, preflight, parseBody, getOrigin } = require("/opt/nodejs/utils/response-utils");
 const { getItem, putItem, queryItems, deleteItem, updateItem, TABLES } = require("/opt/nodejs/utils/db-utils");
 
-const snsClient = new SNSClient({ region: process.env.AWS_REGION || "ap-south-1" });
-const SNS_TOPIC_ARN = process.env.SNS_TOPIC_ARN;
+const sesClient = new SESClient({ region: process.env.AWS_REGION || "ap-south-1" });
+const snsClient = new SNSClient({ region: process.env.AWS_REGION || "ap-south-1" });  // Keep for SMS
+const SENDER_EMAIL = process.env.SENDER_EMAIL || "";
 const ALERT_COOLDOWN_MS = parseInt(process.env.ALERT_COOLDOWN_MS || "10800000", 10); // 3 hours
 
 // ── Email Templates ───────────────────────────────────────────────────────────
@@ -220,8 +222,8 @@ async function sendAlertSMS(subscription, aqiData, alertType) {
 }
 
 async function sendAlertEmail(subscription, aqiData, alertType) {
-  if (!SNS_TOPIC_ARN) {
-    console.warn("SNS_TOPIC_ARN not set — skipping email");
+  if (!SENDER_EMAIL) {
+    console.warn("SENDER_EMAIL not configured - skipping email alert");
     return false;
   }
 
@@ -234,20 +236,58 @@ async function sendAlertEmail(subscription, aqiData, alertType) {
 
   const subject = subjectMap[alertType] || `AirGuard Alert — ${aqiData.location}`;
   const htmlBody = buildAlertEmailHTML(subscription, aqiData, alertType);
+  const textBody = `AirGuard Alert: ${aqiData.location} AQI is ${aqiData.aqi} (${category.label}).\n\n${category.healthImplication}\n\nSchool advice: ${category.schoolAdvice}`;
 
-  await snsClient.send(new PublishCommand({
-    TopicArn: SNS_TOPIC_ARN,
-    Subject:  subject,
-    Message:  htmlBody,
-    MessageAttributes: {
-      email: {
-        DataType:    "String",
-        StringValue: subscription.email
-      }
+  try {
+    await sesClient.send(new SendEmailCommand({
+      Source: SENDER_EMAIL,
+      Destination: {
+        ToAddresses: [subscription.email]
+      },
+      Message: {
+        Subject: {
+          Data: subject,
+          Charset: 'UTF-8'
+        },
+        Body: {
+          Html: {
+            Data: htmlBody,
+            Charset: 'UTF-8'
+          },
+          Text: {
+            Data: textBody,
+            Charset: 'UTF-8'
+          }
+        }
+      },
+      Tags: [
+        {
+          Name: 'Source',
+          Value: 'AirGuard'
+        },
+        {
+          Name: 'AlertType', 
+          Value: alertType
+        },
+        {
+          Name: 'Location',
+          Value: aqiData.location
+        }
+      ]
+    }));
+
+    console.log(`✅ Email sent via SES to ${subscription.email} for ${aqiData.location} (AQI: ${aqiData.aqi})`);
+    return true;
+  } catch (err) {
+    console.error(`❌ SES email failed for ${subscription.email}:`, err.message);
+    
+    // If SES fails (e.g., email not verified), log the details but don't crash
+    if (err.name === 'MessageRejected' && err.message.includes('not verified')) {
+      console.error(`Email ${subscription.email} is not verified in SES. User needs to verify their email.`);
     }
-  }));
-
-  return true;
+    
+    return false;
+  }
 }
 
 // ── Subscription Management ───────────────────────────────────────────────────

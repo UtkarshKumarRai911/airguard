@@ -72,6 +72,11 @@ Parameters:
     Default:     "alerts@airguard.example.com"
     Description: "Verified SES sender address (must be verified in SES)"
 
+  SenderEmailAddress:
+    Type:        String
+    Default:     ""
+    Description: "Verified SES email address for sending alerts (leave empty to use SNS)"
+
 # ── Resources ─────────────────────────────────────────────────────────────────
 Resources:
 
@@ -218,20 +223,27 @@ Resources:
       FunctionName:  !Sub "airguard-alert-system-${Environment}"
       CodeUri:       src/functions/alert-system/
       Handler:       index.handler
-      Description:   Manages subscriptions and dispatches email/SMS alerts via SNS
+      Description:   Manages subscriptions and dispatches email alerts via Amazon SES
       Tracing:       Active
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmailAddress
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsLogTable
-        - SNSPublishMessagePolicy:
-            TopicName: !GetAtt AlertsTopic.TopicName
         - CloudWatchLogsFullAccess
         - Statement:
             - Effect:   Allow
               Action:   sns:Publish
-              Resource: "*"        # SNS SMS requires wildcard resource for direct phone number publish
+              Resource: "*"        # SNS SMS for direct phone number publish
+            - Effect:   Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: 
+                - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
       Events:
         PostSubscribe:
           Type: Api
