@@ -43,20 +43,20 @@ async function fetchFromWAQI(location) {
   const iaqi = d.iaqi || {};
 
   const readings = {
-    pm25: iaqi.pm25?.v ?? null,
-    pm10: iaqi.pm10?.v ?? null,
-    o3:   iaqi.o3?.v   ?? null,
-    no2:  iaqi.no2?.v  ?? null,
-    so2:  iaqi.so2?.v  ?? null,
-    co:   iaqi.co?.v   ?? null
+    pm25: (iaqi.pm25?.v !== 999 && iaqi.pm25?.v != null) ? iaqi.pm25.v : null,
+    pm10: (iaqi.pm10?.v !== 999 && iaqi.pm10?.v != null) ? iaqi.pm10.v : null,
+    o3:   (iaqi.o3?.v   !== 999 && iaqi.o3?.v   != null) ? iaqi.o3.v   : null,
+    no2:  (iaqi.no2?.v  !== 999 && iaqi.no2?.v  != null) ? iaqi.no2.v  : null,
+    so2:  (iaqi.so2?.v  !== 999 && iaqi.so2?.v  != null) ? iaqi.so2.v  : null,
+    co:   (iaqi.co?.v   !== 999 && iaqi.co?.v   != null) ? iaqi.co.v   : null
   };
 
-  // WAQI sometimes returns "-" (a dash string) for AQI when the station's
+  // WAQI sometimes returns "-" (a dash string) or "999" for AQI when the station's
   // composite value is unavailable (stale data, offline sensor, etc.).
   // In that case, compute AQI from the pollutant sub-indices ourselves
   // using CPCB India breakpoints — same method CPCB officially uses.
   let aqiValue = d.aqi;
-  const isInvalidAQI = aqiValue == null || aqiValue === "-" || isNaN(Number(aqiValue));
+  const isInvalidAQI = aqiValue == null || aqiValue === "-" || aqiValue === 999 || isNaN(Number(aqiValue));
 
   if (isInvalidAQI) {
     const { calculateSubIndex, PM25_BREAKPOINTS, PM10_BREAKPOINTS } = require("/opt/nodejs/utils/aqi-utils");
