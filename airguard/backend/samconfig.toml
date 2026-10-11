@@ -1,0 +1,43 @@
+# SAM deploy configuration
+# Run: sam build && sam deploy
+# First time: sam build && sam deploy --guided
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "airguard"
+
+[default.build.parameters]
+cached     = true
+parallel   = true
+
+[default.deploy.parameters]
+stack_name       = "airguard"
+s3_prefix        = "airguard"
+region           = "ap-south-1"
+confirm_changeset = true
+capabilities     = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+resolve_s3       = true
+# Parameter overrides — fill in your WAQI token here
+# (or pass via --parameter-overrides at deploy time)
+# parameter_overrides = "Environment=dev WAQIToken=YOUR_WAQI_TOKEN"
+
+[default.validate.parameters]
+lint = true
+
+[dev]
+[dev.deploy.parameters]
+stack_name    = "airguard-dev"
+region        = "ap-south-1"
+capabilities  = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+resolve_s3    = true
+parameter_overrides = "Environment=dev"
+
+[prod]
+[prod.deploy.parameters]
+stack_name    = "airguard-prod"
+region        = "ap-south-1"
+capabilities  = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+resolve_s3    = true
+parameter_overrides = "Environment=prod"

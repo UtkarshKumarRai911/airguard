@@ -1,0 +1,480 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  AirGuard — Hyperlocal Air Safety Alert System
+  Built for WeMakeDevs × AWS Hackathon 2026 (Environmental Hacks)
+  Track: Air | Team: FUTURE_PROTECTOR
+
+# ── Global defaults applied to all Lambda functions ──────────────────────────
+Globals:
+  Function:
+    Runtime:      nodejs20.x
+    Architectures: [arm64]          # Graviton2 — 20% cheaper, faster cold starts
+    Timeout:      30
+    MemorySize:   256
+    Layers:
+      - !Ref CommonLayer
+    Environment:
+      Variables:
+        NODE_ENV:             !Ref Environment
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+        AQI_CACHE_TABLE:      !Ref AQICacheTable
+        SUBSCRIPTIONS_TABLE:  !Ref SubscriptionsTable
+        ALERTS_LOG_TABLE:     !Ref AlertsLogTable
+        SNS_TOPIC_ARN:        !Ref AlertsTopic
+        WAQI_TOKEN:           !Ref WAQIToken
+        OPENAQ_API_KEY:       !Ref OpenAQApiKey
+        CACHE_TTL_MS:         "1800000"
+        STALE_TTL_MS:         "7200000"
+        ALERT_COOLDOWN_MS:    "10800000"
+        FRONTEND_URL:         !Ref FrontendURL
+        ALLOWED_ORIGINS:      !Ref AllowedOrigins
+
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
+      AllowOrigin:  "'*'"
+    TracingEnabled: true            # X-Ray tracing on all API routes
+
+# ── Parameters (supplied at deploy time) ─────────────────────────────────────
+Parameters:
+  Environment:
+    Type:    String
+    Default: dev
+    AllowedValues: [dev, prod]
+    Description: Deployment environment
+
+  WAQIToken:
+    Type:        String
+    NoEcho:      true               # Never logged or shown in console
+    Description: "WAQI API token from aqicn.org/data-platform/token"
+
+  OpenAQApiKey:
+    Type:        String
+    Default:     ""
+    NoEcho:      true
+    Description: "OpenAQ API key (optional — fallback source)"
+
+  FrontendURL:
+    Type:        String
+    Default:     "https://main.d1234567890.amplifyapp.com"
+    Description: "Amplify frontend URL (update after Amplify deploy)"
+
+  AllowedOrigins:
+    Type:        String
+    Default:     "*"
+    Description: "Comma-separated allowed CORS origins"
+
+  AlertEmailFromAddress:
+    Type:        String
+    Default:     "alerts@airguard.example.com"
+    Description: "Verified SES sender address (must be verified in SES)"
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+Resources:
+
+  # ── Lambda Layer (shared dependencies) ──────────────────────────────────────
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName:          airguard-common-layer
+      Description:        Shared node_modules for all AirGuard Lambda functions
+      ContentUri:         src/layers/common/nodejs/
+      CompatibleRuntimes: [nodejs20.x]
+      RetentionPolicy:    Retain
+    Metadata:
+      BuildMethod: nodejs20.x       # SAM builds this layer separately
+
+  # ── API Gateway ──────────────────────────────────────────────────────────────
+  AirGuardAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name:        !Sub "airguard-api-${Environment}"
+      StageName:   !Ref Environment
+      Description: AirGuard REST API
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath:    "/*"
+          HttpMethod:      "*"
+          ThrottlingBurstLimit: 100
+          ThrottlingRateLimit:  50
+          LoggingLevel:    INFO
+          DataTraceEnabled: false   # Don't log request bodies (privacy)
+          MetricsEnabled:  true
+      AccessLogSetting:
+        DestinationArn: !GetAtt APIGatewayAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","method":"$context.httpMethod","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseTime":"$context.responseLatency","userAgent":"$context.identity.userAgent"}'
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+              Access-Control-Allow-Headers: "'Content-Type'"
+
+  # ── Lambda: AQI Fetcher ───────────────────────────────────────────────────
+  AQIFetcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:  !Sub "airguard-aqi-fetcher-${Environment}"
+      CodeUri:       src/functions/aqi-fetcher/
+      Handler:       index.handler
+      Description:   Fetches real-time AQI from WAQI/OpenAQ with DynamoDB caching
+      Tracing:       Active
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AQICacheTable
+        - CloudWatchLogsFullAccess
+      Events:
+        # Current AQI
+        GetAQI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi
+            Method:    GET
+        # Station search
+        SearchAQI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi/search
+            Method:    GET
+        # Historical data
+        HistoryAQI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi/history
+            Method:    GET
+        # CORS preflight
+        OptionsAQI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi
+            Method:    OPTIONS
+        OptionsAQISearch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi/search
+            Method:    OPTIONS
+        OptionsAQIHistory:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /aqi/history
+            Method:    OPTIONS
+
+  # ── Lambda: AI Recommender ────────────────────────────────────────────────
+  AIRecommenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:  !Sub "airguard-ai-recommender-${Environment}"
+      CodeUri:       src/functions/ai-recommender/
+      Handler:       index.handler
+      Description:   Generates AI-powered health recommendations via Amazon Bedrock
+      Timeout:       60             # Bedrock can take up to 30s
+      MemorySize:    512
+      Tracing:       Active
+      Policies:
+        - CloudWatchLogsFullAccess
+        - Statement:
+            - Effect:   Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-lite-v1:0"
+                - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-micro-v1:0"
+                - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-instant-v1"
+      Environment:
+        Variables:
+          BEDROCK_REGION: !Ref AWS::Region
+      Events:
+        PostRecommend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /recommend
+            Method:    POST
+        OptionsRecommend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /recommend
+            Method:    OPTIONS
+
+  # ── Lambda: Alert System ──────────────────────────────────────────────────
+  AlertSystemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:  !Sub "airguard-alert-system-${Environment}"
+      CodeUri:       src/functions/alert-system/
+      Handler:       index.handler
+      Description:   Manages subscriptions and dispatches email alerts via SNS
+      Tracing:       Active
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SubscriptionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AlertsLogTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
+        - CloudWatchLogsFullAccess
+      Events:
+        PostSubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /subscribe
+            Method:    POST
+        DeleteSubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /subscribe
+            Method:    DELETE
+        GetSubscriptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /subscriptions
+            Method:    GET
+        OptionsSubscribe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /subscribe
+            Method:    OPTIONS
+        OptionsSubscriptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /subscriptions
+            Method:    OPTIONS
+
+  # ── Lambda: Scheduler ────────────────────────────────────────────────────
+  SchedulerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:  !Sub "airguard-scheduler-${Environment}"
+      CodeUri:       src/functions/scheduler/
+      Handler:       index.handler
+      Description:   Refreshes AQI data and triggers alerts every 30 minutes
+      Timeout:       300            # Up to 5min for large subscriber lists
+      MemorySize:    512
+      Tracing:       Active
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AQICacheTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SubscriptionsTable
+        - CloudWatchLogsFullAccess
+        - Statement:
+            - Effect:   Allow
+              Action:   lambda:InvokeFunction
+              Resource: !GetAtt AlertSystemFunction.Arn
+      Environment:
+        Variables:
+          ALERT_LAMBDA_ARN:       !GetAtt AlertSystemFunction.Arn
+          MAX_CONCURRENT_FETCHES: "10"
+      Events:
+        ScheduleRule:
+          Type: Schedule
+          Properties:
+            Name:        !Sub "airguard-refresh-${Environment}"
+            Description: Refresh AQI data and send alerts every 30 minutes
+            Schedule:    rate(30 minutes)
+            Enabled:     true
+
+  # ── DynamoDB: AQI Cache ───────────────────────────────────────────────────
+  AQICacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:   !Sub "airguard-aqi-cache-${Environment}"
+      BillingMode: PAY_PER_REQUEST   # On-demand — no capacity planning needed
+      TableClass:  STANDARD
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled:       true
+      AttributeDefinitions:
+        - AttributeName: locationKey
+          AttributeType: S
+        - AttributeName: fetchedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: locationKey
+          KeyType:       HASH
+        - AttributeName: fetchedAt
+          KeyType:       RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: LocationFetchedAtIndex
+          KeySchema:
+            - AttributeName: locationKey
+              KeyType:       HASH
+            - AttributeName: fetchedAt
+              KeyType:       RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB: Subscriptions ───────────────────────────────────────────────
+  SubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:   !Sub "airguard-subscriptions-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: subscriptionId
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: locationKey
+          AttributeType: S
+      KeySchema:
+        - AttributeName: subscriptionId
+          KeyType:       HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: email
+              KeyType:       HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: LocationIndex
+          KeySchema:
+            - AttributeName: locationKey
+              KeyType:       HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ── DynamoDB: Alerts Log ──────────────────────────────────────────────────
+  AlertsLogTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:   !Sub "airguard-alerts-log-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled:       true          # Auto-expire after 30 days
+      AttributeDefinitions:
+        - AttributeName: alertId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: alertId
+          KeyType:       HASH
+
+  # ── SNS: Email Alerts Topic ───────────────────────────────────────────────
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName:   !Sub "airguard-alerts-${Environment}"
+      DisplayName: AirGuard Air Quality Alerts
+
+  # ── CloudWatch: Log Groups ────────────────────────────────────────────────
+  AQIFetcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/lambda/airguard-aqi-fetcher-${Environment}"
+      RetentionInDays: 14
+
+  AIRecommenderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/lambda/airguard-ai-recommender-${Environment}"
+      RetentionInDays: 14
+
+  AlertSystemLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/lambda/airguard-alert-system-${Environment}"
+      RetentionInDays: 14
+
+  SchedulerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/lambda/airguard-scheduler-${Environment}"
+      RetentionInDays: 14
+
+  APIGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/apigateway/airguard-${Environment}"
+      RetentionInDays: 14
+
+  # ── CloudWatch: Alarms ────────────────────────────────────────────────────
+  HighErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "airguard-high-errors-${Environment}"
+      AlarmDescription:   Lambda error rate exceeds 10% over 5 minutes
+      MetricName:         Errors
+      Namespace:          AWS/Lambda
+      Statistic:          Sum
+      Period:             300
+      EvaluationPeriods:  1
+      Threshold:          5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref AQIFetcherFunction
+      TreatMissingData: notBreaching
+
+  SchedulerFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "airguard-scheduler-failure-${Environment}"
+      AlarmDescription:   Scheduler Lambda failed to execute
+      MetricName:         Errors
+      Namespace:          AWS/Lambda
+      Statistic:          Sum
+      Period:             1800
+      EvaluationPeriods:  1
+      Threshold:          1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref SchedulerFunction
+      TreatMissingData: notBreaching
+
+# ── Outputs (shown after deploy — needed for frontend config) ─────────────────
+Outputs:
+  APIEndpoint:
+    Description: "API Gateway base URL — set this as VITE_API_URL in frontend"
+    Value:        !Sub "https://${AirGuardAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+    Export:
+      Name: !Sub "airguard-api-url-${Environment}"
+
+  AQIFetcherFunctionArn:
+    Description: AQI Fetcher Lambda ARN
+    Value:        !GetAtt AQIFetcherFunction.Arn
+
+  AlertSystemFunctionArn:
+    Description: Alert System Lambda ARN
+    Value:        !GetAtt AlertSystemFunction.Arn
+
+  AlertsTopicArn:
+    Description: "SNS Topic ARN — subscribe email addresses here manually if needed"
+    Value:        !Ref AlertsTopic
+
+  AQICacheTableName:
+    Description: DynamoDB AQI Cache table name
+    Value:        !Ref AQICacheTable
+
+  SubscriptionsTableName:
+    Description: DynamoDB Subscriptions table name
+    Value:        !Ref SubscriptionsTable
+
+  Region:
+    Description: Deployed AWS region
+    Value:        !Ref AWS::Region

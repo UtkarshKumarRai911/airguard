@@ -1,0 +1,12 @@
+{
+  "name": "airguard-common-layer",
+  "version": "1.0.0",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.454.0",
+    "@aws-sdk/lib-dynamodb": "^3.454.0",
+    "@aws-sdk/client-sns": "^3.454.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.454.0",
+    "axios": "^1.6.2",
+    "dayjs": "^1.11.10"
+  }
+}
