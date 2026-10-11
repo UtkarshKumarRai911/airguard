@@ -72,11 +72,6 @@ Parameters:
     Default:     "alerts@airguard.example.com"
     Description: "Verified SES sender address (must be verified in SES)"
 
-  SenderEmailAddress:
-    Type:        String
-    Default:     ""
-    Description: "Verified SES email address for sending alerts (leave empty to use SNS)"
-
 # ── Resources ─────────────────────────────────────────────────────────────────
 Resources:
 
@@ -159,6 +154,14 @@ Resources:
             Path:      /aqi/history
             Method:    GET
         # CORS preflight
+        # School Safety Status Page
+        GetStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /status/{city}
+            Method:    GET
+        # CORS preflight
         OptionsAQI:
           Type: Api
           Properties:
@@ -223,27 +226,16 @@ Resources:
       FunctionName:  !Sub "airguard-alert-system-${Environment}"
       CodeUri:       src/functions/alert-system/
       Handler:       index.handler
-      Description:   Manages subscriptions and dispatches email alerts via Amazon SES
+      Description:   Manages subscriptions and dispatches email alerts via SNS
       Tracing:       Active
-      Environment:
-        Variables:
-          SENDER_EMAIL: !Ref SenderEmailAddress
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AlertsLogTable
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt AlertsTopic.TopicName
         - CloudWatchLogsFullAccess
-        - Statement:
-            - Effect:   Allow
-              Action:   sns:Publish
-              Resource: "*"        # SNS SMS for direct phone number publish
-            - Effect:   Allow
-              Action:
-                - ses:SendEmail
-                - ses:SendRawEmail
-              Resource: 
-                - !Sub "arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*"
       Events:
         PostSubscribe:
           Type: Api
@@ -309,6 +301,72 @@ Resources:
             Description: Refresh AQI data and send alerts every 30 minutes
             Schedule:    rate(30 minutes)
             Enabled:     true
+
+  # ── Lambda: WhatsApp Bot Handler ──────────────────────────────────────────
+  WhatsAppHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:  !Sub "airguard-whatsapp-handler-${Environment}"
+      CodeUri:       src/functions/whatsapp-handler/
+      Handler:       index.handler
+      Description:   WhatsApp Bot — handles incoming messages via Meta webhook
+      Timeout:       30
+      Tracing:       Active
+      Policies:
+        - CloudWatchLogsFullAccess
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !GetAtt AQIFetcherFunction.Arn
+                - !GetAtt AlertSystemFunction.Arn
+      Environment:
+        Variables:
+          WHATSAPP_TOKEN:           "EAAafiY7DCm8BSkxgFCSSKiP91c21FxIYIEZCm4EYQOaRpGkFrZBcyYtYZCmr8sMvvPV4279KtdzEWPOcsjugW9diFZB8SyLsS2HTeKSFuLnfuc0EzZAFKnLTmATV7G6tawnaNl32nP4EdZAqvLOBnEIpZAzCpofZCPbOI0LbwHwRZCIVhYttrVsNYwiDcZADAOZCnXfKpekH8osHEs9BSZCBdQVekO8TwAAwHrEckRCkFyubnUb5SN1Em4Uca3CEU5UM9YQvtS5J96IjpVl2tFKp3ZCT9"
+          WHATSAPP_PHONE_NUMBER_ID: "1390673750796204"
+          WEBHOOK_VERIFY_TOKEN:     "airguard_verify_2026"
+          AQI_FETCHER_ARN:          !GetAtt AQIFetcherFunction.Arn
+          ALERT_SYSTEM_ARN:         !GetAtt AlertSystemFunction.Arn
+      Events:
+        WhatsAppWebhookPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /whatsapp
+            Method:    POST
+        WhatsAppWebhookGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AirGuardAPI
+            Path:      /whatsapp
+            Method:    GET
+
+  WhatsAppHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:    !Sub "/aws/lambda/airguard-whatsapp-handler-${Environment}"
+      RetentionInDays: 14
+
+  # ── EventBridge: Night Forecast Rule (9 PM IST = 15:30 UTC) ──────────────
+  NightForecastRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name:        !Sub "airguard-night-forecast-${Environment}"
+      Description: "Trigger night forecast at 9 PM IST (15:30 UTC)"
+      ScheduleExpression: "cron(30 15 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Id:  SchedulerTarget
+          Arn: !GetAtt SchedulerFunction.Arn
+          Input: '{"source":"airguard.night_forecast"}'
+
+  NightForecastPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SchedulerFunction
+      Action:       lambda:InvokeFunction
+      Principal:    events.amazonaws.com
+      SourceArn:    !GetAtt NightForecastRule.Arn
 
   # ── DynamoDB: AQI Cache ───────────────────────────────────────────────────
   AQICacheTable:
@@ -478,6 +536,14 @@ Outputs:
   AlertSystemFunctionArn:
     Description: Alert System Lambda ARN
     Value:        !GetAtt AlertSystemFunction.Arn
+
+  WhatsAppHandlerFunctionArn:
+    Description: WhatsApp Bot Lambda ARN
+    Value:        !GetAtt WhatsAppHandlerFunction.Arn
+
+  WhatsAppWebhookURL:
+    Description: "WhatsApp webhook URL — register this in Meta Developer Console"
+    Value:        !Sub "https://${AirGuardAPI}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/whatsapp"
 
   AlertsTopicArn:
     Description: "SNS Topic ARN — subscribe email addresses here manually if needed"

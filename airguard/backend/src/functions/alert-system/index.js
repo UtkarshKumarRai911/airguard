@@ -16,15 +16,13 @@
  *   - Cooldown: no repeat alerts within 3 hours for same location
  */
 
-const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
-const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");  // Keep SNS for SMS
+const { SNSClient, PublishCommand } = require("@aws-sdk/client-sns");
 const { getAQICategory } = require("/opt/nodejs/utils/aqi-utils");
 const { success, error, preflight, parseBody, getOrigin } = require("/opt/nodejs/utils/response-utils");
 const { getItem, putItem, queryItems, deleteItem, updateItem, TABLES } = require("/opt/nodejs/utils/db-utils");
 
-const sesClient = new SESClient({ region: process.env.AWS_REGION || "ap-south-1" });
-const snsClient = new SNSClient({ region: process.env.AWS_REGION || "ap-south-1" });  // Keep for SMS
-const SENDER_EMAIL = process.env.SENDER_EMAIL || "";
+const snsClient = new SNSClient({ region: process.env.AWS_REGION || "ap-south-1" });
+const SNS_TOPIC_ARN = process.env.SNS_TOPIC_ARN;
 const ALERT_COOLDOWN_MS = parseInt(process.env.ALERT_COOLDOWN_MS || "10800000", 10); // 3 hours
 
 // ── Email Templates ───────────────────────────────────────────────────────────
@@ -141,89 +139,11 @@ function buildAlertEmailHTML(subscription, aqiData, alertType) {
 </html>`;
 }
 
-// ── SMS Templates ─────────────────────────────────────────────────────────────
-
-function buildSMSText(aqiData, alertType) {
-  const category = getAQICategory(aqiData.aqi);
-  const lines = [];
-
-  // Header
-  if (alertType === "daily_summary") {
-    lines.push(`AirGuard Daily Summary`);
-  } else {
-    lines.push(`⚠️ AirGuard Alert`);
-  }
-
-  // Core info
-  lines.push(`${aqiData.location}: AQI ${aqiData.aqi} (${category.label})`);
-
-  // Advice
-  if (aqiData.aqi >= 300) {
-    lines.push(`School: NO outdoor activities`);
-    lines.push(`Mask: N95 mandatory`);
-  } else if (aqiData.aqi >= 200) {
-    lines.push(`School: Limit outdoor time`);
-    lines.push(`Mask: N95 recommended`);
-  } else if (aqiData.aqi >= 150) {
-    lines.push(`School: Monitor sensitive children`);
-    lines.push(`Mask: Recommended for vulnerable`);
-  } else {
-    lines.push(`Conditions acceptable for most`);
-  }
-
-  // Footer
-  lines.push(`Reply STOP to unsubscribe`);
-
-  return lines.join('\n');
-}
-
 // ── SNS Publisher ─────────────────────────────────────────────────────────────
 
-async function sendAlert(subscription, aqiData, alertType) {
-  if (!subscription.alertChannel) {
-    // Legacy: default to email for old subscriptions
-    subscription.alertChannel = "email";
-  }
-
-  if (subscription.alertChannel === "sms") {
-    // SMS path
-    return sendAlertSMS(subscription, aqiData, alertType);
-  } else {
-    // Email path
-    return sendAlertEmail(subscription, aqiData, alertType);
-  }
-}
-
-async function sendAlertSMS(subscription, aqiData, alertType) {
-  if (!subscription.phone) {
-    console.warn("SMS channel selected but no phone number");
-    return false;
-  }
-
-  const message = buildSMSText(aqiData, alertType);
-
-  await snsClient.send(new PublishCommand({
-    PhoneNumber: `+91${subscription.phone}`,
-    Message: message,
-    MessageAttributes: {
-      'AWS.SNS.SMS.SMSType': {
-        DataType: 'String',
-        StringValue: 'Transactional' // Priority delivery
-      },
-      'AWS.SNS.SMS.SenderID': {
-        DataType: 'String',
-        StringValue: 'AirGuard' // Shown as sender name (if supported by carrier)
-      }
-    }
-  }));
-
-  console.log(`SMS sent to +91${subscription.phone} for ${aqiData.location}`);
-  return true;
-}
-
 async function sendAlertEmail(subscription, aqiData, alertType) {
-  if (!SENDER_EMAIL) {
-    console.warn("SENDER_EMAIL not configured - skipping email alert");
+  if (!SNS_TOPIC_ARN) {
+    console.warn("SNS_TOPIC_ARN not set — skipping email");
     return false;
   }
 
@@ -236,58 +156,20 @@ async function sendAlertEmail(subscription, aqiData, alertType) {
 
   const subject = subjectMap[alertType] || `AirGuard Alert — ${aqiData.location}`;
   const htmlBody = buildAlertEmailHTML(subscription, aqiData, alertType);
-  const textBody = `AirGuard Alert: ${aqiData.location} AQI is ${aqiData.aqi} (${category.label}).\n\n${category.healthImplication}\n\nSchool advice: ${category.schoolAdvice}`;
 
-  try {
-    await sesClient.send(new SendEmailCommand({
-      Source: SENDER_EMAIL,
-      Destination: {
-        ToAddresses: [subscription.email]
-      },
-      Message: {
-        Subject: {
-          Data: subject,
-          Charset: 'UTF-8'
-        },
-        Body: {
-          Html: {
-            Data: htmlBody,
-            Charset: 'UTF-8'
-          },
-          Text: {
-            Data: textBody,
-            Charset: 'UTF-8'
-          }
-        }
-      },
-      Tags: [
-        {
-          Name: 'Source',
-          Value: 'AirGuard'
-        },
-        {
-          Name: 'AlertType', 
-          Value: alertType
-        },
-        {
-          Name: 'Location',
-          Value: aqiData.location
-        }
-      ]
-    }));
-
-    console.log(`✅ Email sent via SES to ${subscription.email} for ${aqiData.location} (AQI: ${aqiData.aqi})`);
-    return true;
-  } catch (err) {
-    console.error(`❌ SES email failed for ${subscription.email}:`, err.message);
-    
-    // If SES fails (e.g., email not verified), log the details but don't crash
-    if (err.name === 'MessageRejected' && err.message.includes('not verified')) {
-      console.error(`Email ${subscription.email} is not verified in SES. User needs to verify their email.`);
+  await snsClient.send(new PublishCommand({
+    TopicArn: SNS_TOPIC_ARN,
+    Subject:  subject,
+    Message:  htmlBody,
+    MessageAttributes: {
+      email: {
+        DataType:    "String",
+        StringValue: subscription.email
+      }
     }
-    
-    return false;
-  }
+  }));
+
+  return true;
 }
 
 // ── Subscription Management ───────────────────────────────────────────────────
@@ -297,42 +179,20 @@ function validateEmail(email) {
   return re.test(String(email).toLowerCase());
 }
 
-function validateIndianPhone(phone) {
-  // Indian mobile: 10 digits starting with 6, 7, 8, or 9
-  const cleaned = String(phone).replace(/[\s\-\(\)]/g, '');
-  return /^[6-9]\d{9}$/.test(cleaned);
-}
-
 async function handleSubscribe(body, origin) {
-  const { email, phone, alertChannel, location, threshold, userProfile } = body;
+  const { email, location, threshold, userProfile } = body;
 
-  // Determine channel and validate
-  const channel = alertChannel || (email ? "email" : phone ? "sms" : null);
-  
-  if (!channel || (channel !== "email" && channel !== "sms")) {
-    return error("alertChannel must be 'email' or 'sms'", 400, origin);
+  if (!email || !validateEmail(email)) {
+    return error("Valid email address is required", 400, origin);
   }
-
-  let identifier;
-  if (channel === "email") {
-    if (!email || !validateEmail(email)) {
-      return error("Valid email address is required", 400, origin);
-    }
-    identifier = email.toLowerCase().trim();
-  } else {
-    if (!phone || !validateIndianPhone(phone)) {
-      return error("Valid 10-digit Indian mobile number is required", 400, origin);
-    }
-    identifier = String(phone).replace(/[\s\-\(\)]/g, '');
-  }
-
   if (!location || typeof location !== "string" || location.trim().length < 2) {
     return error("Valid location is required", 400, origin);
   }
 
+  const cleanEmail = email.toLowerCase().trim();
   const cleanLocation = location.trim().substring(0, 100);
   const alertThreshold = Math.min(500, Math.max(50, parseInt(threshold || "150", 10)));
-  const subscriptionId = `${channel}:${identifier}#${cleanLocation.toLowerCase().replace(/\s+/g, "-")}`;
+  const subscriptionId = `${cleanEmail}#${cleanLocation.toLowerCase().replace(/\s+/g, "-")}`;
 
   // Check if already subscribed
   const existing = await getItem(TABLES.SUBSCRIPTIONS, { subscriptionId });
@@ -345,9 +205,7 @@ async function handleSubscribe(body, origin) {
 
   const subscription = {
     subscriptionId,
-    email:        channel === "email" ? identifier : null,
-    phone:        channel === "sms" ? identifier : null,
-    alertChannel: channel,
+    email:        cleanEmail,
     location:     cleanLocation,
     locationKey:  cleanLocation.toLowerCase().replace(/\s+/g, "-"),
     threshold:    alertThreshold,
@@ -360,41 +218,26 @@ async function handleSubscribe(body, origin) {
 
   await putItem(TABLES.SUBSCRIPTIONS, subscription);
 
-  console.log(`New subscription: ${channel}:${identifier} → ${cleanLocation} (threshold: ${alertThreshold})`);
+  console.log(`New subscription: ${cleanEmail} → ${cleanLocation} (threshold: ${alertThreshold})`);
 
   return success({
-    message: `Subscribed! You'll receive ${channel === "email" ? "email" : "SMS"} alerts when AQI in ${cleanLocation} exceeds ${alertThreshold}.`,
+    message: `Subscribed! You'll receive alerts when AQI in ${cleanLocation} exceeds ${alertThreshold}.`,
     subscriptionId,
-    threshold: alertThreshold,
-    channel
+    threshold: alertThreshold
   }, 201, origin);
 }
 
 async function handleUnsubscribe(body, origin) {
-  const { email, phone, location } = body;
+  const { email, location } = body;
 
-  let identifier, channel;
-  if (email) {
-    if (!validateEmail(email)) {
-      return error("Valid email address is required", 400, origin);
-    }
-    identifier = email.toLowerCase().trim();
-    channel = "email";
-  } else if (phone) {
-    if (!validateIndianPhone(phone)) {
-      return error("Valid phone number is required", 400, origin);
-    }
-    identifier = String(phone).replace(/[\s\-\(\)]/g, '');
-    channel = "sms";
-  } else {
-    return error("Email or phone number is required", 400, origin);
+  if (!email || !validateEmail(email)) {
+    return error("Valid email address is required", 400, origin);
   }
-
   if (!location || typeof location !== "string") {
     return error("location is required", 400, origin);
   }
 
-  const subscriptionId = `${channel}:${identifier}#${location.trim().toLowerCase().replace(/\s+/g, "-")}`;
+  const subscriptionId = `${email.toLowerCase().trim()}#${location.trim().toLowerCase().replace(/\s+/g, "-")}`;
 
   const existing = await getItem(TABLES.SUBSCRIPTIONS, { subscriptionId });
   if (!existing) {
@@ -491,7 +334,7 @@ async function processAQIUpdate(aqiData) {
         continue;
       }
 
-      await sendAlert(sub, aqiData, alertType);
+      await sendAlertEmail(sub, aqiData, alertType);
 
       // Update subscription record
       await updateItem(TABLES.SUBSCRIPTIONS, { subscriptionId: sub.subscriptionId }, {
@@ -502,15 +345,13 @@ async function processAQIUpdate(aqiData) {
 
       // Log the alert
       await putItem(TABLES.ALERTS_LOG, {
-        alertId:      `${sub.subscriptionId}#${Date.now()}`,
-        email:        sub.email,
-        phone:        sub.phone,
-        alertChannel: sub.alertChannel,
-        location:     aqiData.location,
-        aqi:          aqiData.aqi,
+        alertId:    `${sub.subscriptionId}#${Date.now()}`,
+        email:      sub.email,
+        location:   aqiData.location,
+        aqi:        aqiData.aqi,
         alertType,
-        sentAt:       new Date().toISOString(),
-        ttl:          Math.floor(Date.now() / 1000) + 2592000 // 30 days
+        sentAt:     new Date().toISOString(),
+        ttl:        Math.floor(Date.now() / 1000) + 2592000 // 30 days
       });
 
       sent++;
@@ -523,6 +364,146 @@ async function processAQIUpdate(aqiData) {
   return { sent, skipped, total: activeSubscriptions.length };
 }
 
+// ── Night Forecast Email Template ─────────────────────────────────────────────
+
+function buildNightForecastEmailHTML(subscription, aqiData) {
+  const forecast = aqiData.forecast;
+  const category = getAQICategory(aqiData.aqi);
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tomorrow's AQI Forecast — ${aqiData.location}</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:20px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;border:2px solid #f59e0b;">
+          <tr>
+            <td style="background:#1a1a2e;padding:20px 30px;text-align:center;">
+              <h1 style="color:#ffffff;margin:0;font-size:24px;">🌿 AirGuard Night Forecast</h1>
+              <p style="color:#aaaaaa;margin:5px 0 0;font-size:13px;">Decide tonight — not in a rush at 7 AM</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#fff8e1;padding:25px 30px;text-align:center;border-bottom:3px solid #f59e0b;">
+              <p style="margin:0;font-size:14px;color:#f59e0b;font-weight:bold;text-transform:uppercase;letter-spacing:2px;">⏰ Tomorrow Morning Forecast (7–10 AM)</p>
+              <p style="margin:8px 0 0;font-size:48px;font-weight:900;color:#f59e0b;line-height:1;">${forecast.predictedRange}</p>
+              <p style="margin:4px 0 0;font-size:20px;font-weight:bold;color:#333;">${forecast.predictedCategory}</p>
+              <p style="margin:6px 0 0;font-size:15px;color:#666;">📍 ${aqiData.location}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 30px;border-bottom:1px solid #eeeeee;">
+              <h3 style="color:#333333;margin:0 0 8px;font-size:16px;">Tonight (current AQI)</h3>
+              <p style="margin:0;font-size:32px;font-weight:bold;color:#666;">${aqiData.aqi}</p>
+              <p style="margin:4px 0 0;font-size:14px;color:#888;">${category.label} — ${forecast.keyFactor}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 30px;border-bottom:1px solid #eeeeee;background:#f9fafb;">
+              <h3 style="color:#333333;margin:0 0 8px;font-size:16px;">What to do tonight</h3>
+              <p style="color:#555555;margin:0;line-height:1.6;font-size:14px;">${forecast.recommendation}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 30px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#999;">
+                Forecast confidence: <strong style="color:#333;text-transform:capitalize;">${forecast.confidence}</strong>
+              </p>
+              <p style="margin:6px 0 0;font-size:11px;color:#bbb;">Generated at 9 PM IST using Amazon Bedrock Nova Lite</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 30px;text-align:center;background:#f8f9fa;">
+              <p style="margin:0;font-size:12px;color:#999;">
+                <a href="${process.env.FRONTEND_URL || "https://airguard.example.com"}" style="color:#f59e0b;text-decoration:none;font-weight:600;">Check live AQI at 6 AM →</a>
+              </p>
+              <p style="margin:8px 0 0;font-size:11px;color:#bbb;">
+                Alerts for <strong>${aqiData.location}</strong> ·
+                <a href="${process.env.FRONTEND_URL || "https://airguard.example.com"}/unsubscribe?email=${encodeURIComponent(subscription.email)}" style="color:#999;text-decoration:underline;">Unsubscribe</a>
+              </p>
+              <p style="margin:6px 0 0;font-size:11px;color:#bbb;">AirGuard © 2026 — WeMakeDevs × AWS Hackathon</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function sendNightForecastEmail(subscription, aqiData) {
+  if (!SNS_TOPIC_ARN) {
+    console.warn("SNS_TOPIC_ARN not set — skipping night forecast email");
+    return false;
+  }
+
+  const subject = `⏰ Tomorrow's AQI Forecast: ${aqiData.location} — Likely ${aqiData.forecast.predictedCategory}`;
+  const htmlBody = buildNightForecastEmailHTML(subscription, aqiData);
+
+  await snsClient.send(new PublishCommand({
+    TopicArn: SNS_TOPIC_ARN,
+    Subject:  subject,
+    Message:  htmlBody,
+    MessageAttributes: {
+      email: {
+        DataType:    "String",
+        StringValue: subscription.email
+      }
+    }
+  }));
+
+  return true;
+}
+
+// ── Process Night Forecast (called by Scheduler at 9 PM) ──────────────────────
+
+async function processNightForecast(aqiData) {
+  const locationKey = aqiData.location?.toLowerCase().replace(/\s+/g, "-");
+  if (!locationKey) return { sent: 0, error: "No location key" };
+
+  const subscriptions = await queryItems(
+    TABLES.SUBSCRIPTIONS,
+    "locationKey = :lk",
+    { ":lk": locationKey },
+    "LocationIndex"
+  );
+
+  const activeSubscriptions = subscriptions.filter(s => s.active);
+  let sent = 0;
+
+  for (const sub of activeSubscriptions) {
+    try {
+      await sendNightForecastEmail(sub, aqiData);
+
+      // Log the alert
+      await putItem(TABLES.ALERTS_LOG, {
+        alertId:   `${sub.subscriptionId}#${Date.now()}`,
+        email:     sub.email,
+        location:  aqiData.location,
+        aqi:       aqiData.aqi,
+        alertType: "night_forecast",
+        forecast:  aqiData.forecast,
+        sentAt:    new Date().toISOString(),
+        ttl:       Math.floor(Date.now() / 1000) + 2592000 // 30 days
+      });
+
+      sent++;
+      console.log(`Night forecast email sent to ${sub.email} for ${aqiData.location}`);
+    } catch (err) {
+      console.error(`Failed to send night forecast to ${sub.email}:`, err.message);
+    }
+  }
+
+  return { sent, total: activeSubscriptions.length };
+}
+
 // ── Main Handler ──────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
@@ -533,6 +514,12 @@ exports.handler = async (event) => {
   // Internal invocation from Scheduler (no HTTP context)
   if (event.source === "airguard.scheduler") {
     const result = await processAQIUpdate(event.aqiData);
+    return { statusCode: 200, body: JSON.stringify(result) };
+  }
+
+  // Night forecast invocation from Scheduler
+  if (event.source === "airguard.scheduler.night_forecast") {
+    const result = await processNightForecast(event.aqiData);
     return { statusCode: 200, body: JSON.stringify(result) };
   }
 

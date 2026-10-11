@@ -77,7 +77,7 @@ export default function EmptyState({ onCitySelect }) {
           borderRadius: "8px",
           padding:      "12px 20px",
           maxWidth:     "500px",
-          margin:       "0 auto",
+          margin:       "0 auto 16px",
           fontSize:     "14px",
           color:        "var(--text-primary)",
           lineHeight:   "1.6"
@@ -86,6 +86,50 @@ export default function EmptyState({ onCitySelect }) {
           <strong style={{ color: "#a78bfa" }}>AI-powered health advice</strong> (Amazon Bedrock)
           + Email alerts when air quality drops.
         </div>
+
+        {/* WhatsApp Bot CTA */}
+        <a
+          href="https://wa.me/15556447862"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display:        "inline-flex",
+            alignItems:     "center",
+            gap:            "10px",
+            background:     "rgba(37,211,102,0.1)",
+            border:         "1px solid rgba(37,211,102,0.35)",
+            borderRadius:   "10px",
+            padding:        "12px 20px",
+            fontSize:       "14px",
+            color:          "#25D366",
+            fontWeight:     "600",
+            textDecoration: "none",
+            transition:     "all 0.2s",
+            marginBottom:   "8px"
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = "rgba(37,211,102,0.18)";
+            e.currentTarget.style.transform = "translateY(-1px)";
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = "rgba(37,211,102,0.1)";
+            e.currentTarget.style.transform = "translateY(0)";
+          }}
+        >
+          <span style={{ fontSize: "20px" }}>💬</span>
+          WhatsApp Bot — Text <strong style={{ marginLeft: "4px" }}>"Delhi AQI"</strong>
+          <span style={{
+            background:   "#25D366",
+            color:        "#fff",
+            borderRadius: "6px",
+            padding:      "2px 8px",
+            fontSize:     "12px",
+            fontWeight:   "700",
+            marginLeft:   "4px"
+          }}>
+            +1 (555) 644-7862
+          </span>
+        </a>
       </div>
 
       {/* Stats */}

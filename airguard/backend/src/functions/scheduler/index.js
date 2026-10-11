@@ -18,13 +18,30 @@
 const { LambdaClient, InvokeCommand } = require("@aws-sdk/client-lambda");
 const axios = require("axios");
 const { buildAQIResponse } = require("/opt/nodejs/utils/aqi-utils");
-const { getItem, putItem, scanItems, TABLES } = require("/opt/nodejs/utils/db-utils");
+const { getItem, putItem, scanItems, queryItems, TABLES } = require("/opt/nodejs/utils/db-utils");
 
 const lambdaClient = new LambdaClient({ region: process.env.AWS_REGION || "ap-south-1" });
 
 const WAQI_TOKEN       = process.env.WAQI_TOKEN;
 const ALERT_LAMBDA_ARN = process.env.ALERT_LAMBDA_ARN;
 const MAX_CONCURRENT   = parseInt(process.env.MAX_CONCURRENT_FETCHES || "10", 10);
+
+// ── Check if this is a night forecast run (9 PM IST) ──────────────────────────
+function isNightForecastRun(event) {
+  // EventBridge sends { source: "airguard.night_forecast" } in Input
+  if (event?.source === "airguard.night_forecast") return true;
+
+  // Also check time-based (backup detection)
+  const istHour = parseInt(
+    new Date().toLocaleString("en-US", {
+      timeZone: "Asia/Kolkata",
+      hour:     "numeric",
+      hour12:   false
+    }),
+    10
+  );
+  return istHour === 21; // 9 PM IST
+}
 
 // ── Fetch AQI (simplified — mirrors aqi-fetcher logic for internal use) ───────
 
@@ -165,12 +182,172 @@ async function processBatch(locations) {
   return results;
 }
 
+// ── Night Forecast Handler (runs at 9 PM IST) ─────────────────────────────────
+
+async function runNightForecast() {
+  console.log("🌙 Night forecast run triggered:", new Date().toISOString());
+
+  const { getSeasonalContext } = require("/opt/nodejs/utils/aqi-utils");
+
+  try {
+    // Get all active subscriptions
+    const subscriptions = await scanItems(
+      TABLES.SUBSCRIPTIONS,
+      "active = :a",
+      { ":a": true }
+    );
+
+    if (subscriptions.length === 0) {
+      console.log("No active subscriptions — skipping night forecast");
+      return { statusCode: 200, body: "No subscriptions" };
+    }
+
+    // Deduplicate locations
+    const uniqueLocations = [...new Set(
+      subscriptions.map(s => s.location).filter(Boolean)
+    )];
+
+    console.log(`Running night forecast for ${uniqueLocations.length} locations`);
+
+    const results = [];
+
+    for (const location of uniqueLocations) {
+      try {
+        const locationKey = location.toLowerCase().replace(/\s+/g, "-");
+
+        // Get current AQI from cache
+        const cached = await getItem(TABLES.AQI_CACHE, { locationKey });
+        if (!cached || !cached.aqi) {
+          console.log(`Skipping ${location} — no cached AQI data`);
+          continue;
+        }
+
+        const currentAQI = cached.aqi;
+
+        // Get 3-hour-ago reading for trend
+        const history = await queryItems(
+          TABLES.AQI_CACHE,
+          "locationKey = :lk",
+          { ":lk": locationKey },
+          "LocationFetchedAtIndex"
+        );
+
+        const threeHoursAgo = history
+          .filter(h => {
+            const age = (Date.now() - new Date(h.fetchedAt).getTime()) / 3600000;
+            return age >= 2.5 && age <= 3.5;
+          })
+          .sort((a, b) => new Date(b.fetchedAt) - new Date(a.fetchedAt))[0];
+
+        const trendDelta = threeHoursAgo ? currentAQI - threeHoursAgo.aqi : 0;
+        const seasonal = getSeasonalContext();
+        const tomorrow = new Date();
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const isMondayTomorrow = tomorrow.getDay() === 1;
+
+        // Build Bedrock prompt for night forecast
+        const prompt = `You are an air quality forecaster for India.
+
+Current data for ${location}:
+- AQI right now: ${currentAQI} (${cached.category})
+- Trend: ${trendDelta > 0 ? "Rising" : trendDelta < 0 ? "Falling" : "Stable"} (${trendDelta > 0 ? "+" : ""}${trendDelta} pts in 3 hours)
+- Time: ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+- Tomorrow: ${isMondayTomorrow ? "Monday (high traffic day)" : "Weekday"}
+- Season: ${seasonal.cause} — ${seasonal.note}
+
+Based on these signals, predict tomorrow morning's AQI (7–10 AM).
+Respond ONLY with valid JSON, no markdown:
+{
+  "predictedRange": "e.g. 250-310",
+  "predictedCategory": "Good|Satisfactory|Moderate|Poor|Very Poor|Severe",
+  "confidence": "low|medium|high",
+  "keyFactor": "main reason for prediction in one sentence",
+  "recommendation": "one actionable sentence for a parent",
+  "sendAlert": true or false
+}
+
+Set sendAlert to true only if predictedCategory is Poor, Very Poor, or Severe.`;
+
+        // Call Bedrock
+        const { BedrockRuntimeClient, InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
+        const bedrockClient = new BedrockRuntimeClient({
+          region: process.env.BEDROCK_REGION || process.env.AWS_REGION
+        });
+
+        const bedrockCommand = new InvokeModelCommand({
+          modelId:     "amazon.nova-lite-v1:0",
+          contentType: "application/json",
+          accept:      "application/json",
+          body:        JSON.stringify({
+            messages: [{ role: "user", content: [{ text: prompt }] }],
+            inferenceConfig: { maxTokens: 400, temperature: 0.3, topP: 0.9 }
+          })
+        });
+
+        const bedrockResponse = await bedrockClient.send(bedrockCommand);
+        const responseBody = JSON.parse(new TextDecoder().decode(bedrockResponse.body));
+        const text = responseBody.output?.message?.content?.[0]?.text || "";
+
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          console.warn(`Bedrock returned no JSON for ${location}`);
+          continue;
+        }
+
+        const forecast = JSON.parse(jsonMatch[0]);
+
+        if (!forecast.sendAlert) {
+          console.log(`${location}: forecast is ${forecast.predictedCategory} — no alert needed`);
+          results.push({ location, forecast, status: "no_alert" });
+          continue;
+        }
+
+        // Invoke alert-system Lambda with night_forecast type
+        await lambdaClient.send(new InvokeCommand({
+          FunctionName:   ALERT_LAMBDA_ARN,
+          InvocationType: "Event",
+          Payload: JSON.stringify({
+            source:  "airguard.scheduler.night_forecast",
+            aqiData: {
+              ...cached,
+              location,
+              forecast
+            }
+          })
+        }));
+
+        console.log(`✅ Night forecast alert sent for ${location}: ${forecast.predictedCategory}`);
+        results.push({ location, forecast, status: "alert_sent" });
+
+      } catch (err) {
+        console.error(`Night forecast failed for ${location}:`, err.message);
+        results.push({ location, status: "error", error: err.message });
+      }
+    }
+
+    return {
+      statusCode: 200,
+      body: JSON.stringify({ nightForecast: results, total: results.length })
+    };
+
+  } catch (err) {
+    console.error("Night forecast fatal error:", err);
+    return { statusCode: 500, body: `Night forecast failed: ${err.message}` };
+  }
+}
+
 // ── Main Handler ──────────────────────────────────────────────────────────────
 
 exports.handler = async (event) => {
   const startTime = Date.now();
   console.log("Scheduler triggered:", new Date().toISOString());
 
+  // ── Night forecast path (9 PM IST) ──
+  if (isNightForecastRun(event)) {
+    return await runNightForecast();
+  }
+
+  // ── Regular 30-min AQI refresh path ──
   try {
     // Get all active subscriptions
     const subscriptions = await scanItems(

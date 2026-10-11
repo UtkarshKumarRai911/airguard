@@ -1,5 +1,5 @@
 import React from "react";
-import { RefreshCw, MapPin, Clock, Wifi, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { RefreshCw, MapPin, Clock, Wifi } from "lucide-react";
 import { getAQILevel } from "../utils/aqi-colors";
 import ShareButton from "./ShareButton";
 
@@ -42,80 +42,55 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
 
   return (
     <div
-      className="fade-in glass-card"
+      className="fade-in"
       style={{
-        background:   `linear-gradient(135deg, ${level.color}08 0%, rgba(30, 41, 59, 0.5) 100%)`,
-        border:       `1px solid ${level.color}33`,
-        borderRadius: "var(--radius-lg)",
+        background:   "var(--bg-secondary)",
+        border:       `1px solid ${level.color}44`,
+        borderRadius: "var(--radius)",
         overflow:     "hidden",
-        boxShadow:    `0 8px 32px ${level.color}22, 0 0 60px ${level.color}11`,
-        backdropFilter: "blur(20px)",
-        position: "relative"
+        boxShadow:    `0 0 30px ${level.color}22`
       }}
     >
-      {/* Animated gradient background overlay */}
-      <div style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: `radial-gradient(circle at 20% 50%, ${level.color}15 0%, transparent 50%)`,
-        pointerEvents: "none",
-        opacity: 0.6
-      }} />
-      
-      {/* Color accent bar with gradient */}
-      <div style={{ 
-        height: "5px", 
-        background: `linear-gradient(90deg, ${level.color} 0%, ${level.color}66 100%)`,
-        boxShadow: `0 2px 8px ${level.color}44`
-      }} />
+      {/* Color accent bar */}
+      <div style={{ height: "4px", background: level.color }} />
 
-      <div style={{ padding: "32px", position: "relative", zIndex: 1 }}>
+      <div style={{ padding: "24px 28px" }}>
         {/* Location & meta */}
         <div style={{
           display:       "flex",
           justifyContent: "space-between",
           alignItems:    "flex-start",
-          marginBottom:  "28px",
+          marginBottom:  "20px",
           flexWrap:      "wrap",
-          gap:           "12px"
+          gap:           "8px"
         }}>
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-              <MapPin size={16} color={level.color} strokeWidth={2.5} />
-              <span style={{ 
-                fontSize: "15px", 
-                color: "var(--text-primary)",
-                fontWeight: "600",
-                letterSpacing: "0.01em"
-              }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
+              <MapPin size={14} color="var(--text-muted)" />
+              <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
                 {data.stationName || data.location}
               </span>
             </div>
             {data.stationName && data.stationName !== data.location && (
-              <p style={{ fontSize: "13px", color: "var(--text-dim)", marginLeft: "24px" }}>
+              <p style={{ fontSize: "12px", color: "var(--text-muted)", marginLeft: "20px" }}>
                 {data.location}
               </p>
             )}
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             {/* Cache status */}
             {data.cached && !data.stale && (
               <span style={{
                 fontSize: "11px",
-                fontWeight: "600",
-                color:    "#34d399",
-                background: "rgba(16,185,129,0.15)",
-                border:   "1px solid rgba(16,185,129,0.4)",
-                borderRadius: "6px",
-                padding:  "4px 10px",
+                color:    "#10b981",
+                background: "rgba(16,185,129,0.1)",
+                border:   "1px solid rgba(16,185,129,0.3)",
+                borderRadius: "4px",
+                padding:  "2px 8px",
                 display:  "flex",
                 alignItems: "center",
-                gap:      "5px",
-                boxShadow: "0 0 10px rgba(16,185,129,0.2)"
+                gap:      "4px"
               }} title="Served from DynamoDB cache — reduces API calls">
                 ⚡ Cached
               </span>
@@ -125,31 +100,25 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
             {data.stale && (
               <span style={{
                 fontSize: "11px",
-                fontWeight: "600",
-                color:    "#fbbf24",
-                background: "rgba(245,158,11,0.15)",
-                border:   "1px solid rgba(245,158,11,0.4)",
-                borderRadius: "6px",
-                padding:  "4px 10px"
+                color:    "#f59e0b",
+                background: "rgba(245,158,11,0.1)",
+                border:   "1px solid rgba(245,158,11,0.3)",
+                borderRadius: "4px",
+                padding:  "2px 8px"
               }}>
-                ⚠️ Stale
+                ⚠️ Stale data
               </span>
             )}
 
             {/* Data source */}
             <span style={{
               fontSize:    "11px",
-              fontWeight: "600",
               color:       "var(--text-muted)",
-              background: "rgba(148,163,184,0.1)",
-              border: "1px solid rgba(148,163,184,0.2)",
-              borderRadius: "6px",
-              padding: "4px 10px",
               display:     "flex",
               alignItems:  "center",
-              gap:         "5px"
+              gap:         "4px"
             }}>
-              <Wifi size={12} />
+              <Wifi size={11} />
               {data.source || "WAQI"}
             </span>
 
@@ -158,144 +127,70 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
               onClick={onRefresh}
               title="Refresh AQI data"
               aria-label="Refresh data"
-              className="gradient-btn"
               style={{
-                background:   "linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(6,182,212,0.2) 100%)",
-                border:       "1px solid rgba(16,185,129,0.4)",
-                borderRadius: "8px",
-                padding:      "6px 12px",
-                color:        "#34d399",
+                background:   "transparent",
+                border:       "1px solid var(--border)",
+                borderRadius: "6px",
+                padding:      "4px 8px",
+                color:        "var(--text-muted)",
                 cursor:       "pointer",
                 display:      "flex",
                 alignItems:   "center",
-                gap:          "6px",
-                fontSize:     "12px",
-                fontWeight: "600",
-                boxShadow: "0 0 12px rgba(16,185,129,0.2)",
-                transition: "all 0.2s ease"
+                gap:          "4px",
+                fontSize:     "12px"
               }}
             >
-              <RefreshCw size={13} />
+              <RefreshCw size={12} />
               Refresh
             </button>
           </div>
         </div>
 
         {/* AQI value + category */}
-        <div style={{ display: "flex", alignItems: "center", gap: "32px", flexWrap: "wrap", marginBottom: "24px" }}>
-          {/* Big AQI number with trend - floating animation */}
-          <div style={{ textAlign: "center" }} className="floating">
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px" }}>
-              <div style={{
-                fontSize:    "96px",
-                fontWeight:  "900",
-                lineHeight:  "1",
-                background: `linear-gradient(135deg, ${level.color} 0%, ${level.color}cc 100%)`,
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                fontVariantNumeric: "tabular-nums",
-                filter: `drop-shadow(0 4px 12px ${level.color}44)`,
-                textShadow: `0 0 40px ${level.color}33`
-              }}>
-                {data.aqi ?? "–"}
-              </div>
-              
-              {/* Trend indicator with animation */}
-              {data.trend && data.trend !== "stable" && (
-                <div style={{ 
-                  display: "flex", 
-                  flexDirection: "column", 
-                  alignItems: "center",
-                  marginLeft: "6px",
-                  animation: data.trend === "rising" ? "pulse 2s ease-in-out infinite" : ""
-                }}>
-                  {data.trend === "rising" ? (
-                    <div style={{
-                      background: "linear-gradient(135deg, #ef4444 0%, #f97316 100%)",
-                      borderRadius: "12px",
-                      padding: "8px",
-                      boxShadow: "0 4px 16px rgba(239,68,68,0.4)"
-                    }}>
-                      <TrendingUp size={32} color="white" strokeWidth={3} />
-                    </div>
-                  ) : (
-                    <div style={{
-                      background: "linear-gradient(135deg, #10b981 0%, #34d399 100%)",
-                      borderRadius: "12px",
-                      padding: "8px",
-                      boxShadow: "0 4px 16px rgba(16,185,129,0.4)"
-                    }}>
-                      <TrendingDown size={32} color="white" strokeWidth={3} />
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "20px", flexWrap: "wrap" }}>
+          {/* Big AQI number */}
+          <div style={{ textAlign: "center" }}>
             <div style={{
-              fontSize:    "14px",
-              fontWeight: "600",
+              fontSize:    "80px",
+              fontWeight:  "900",
+              lineHeight:  "1",
+              color:       level.color,
+              fontVariantNumeric: "tabular-nums"
+            }}>
+              {data.aqi ?? "–"}
+            </div>
+            <div style={{
+              fontSize:    "13px",
               color:       "var(--text-muted)",
-              marginTop:   "8px",
-              letterSpacing: "0.05em"
+              marginTop:   "4px"
             }}>
               AQI (CPCB India)
             </div>
-            
-            {/* Trend text with gradient */}
-            {data.trend && data.trendPeriodHours > 0 && (
-              <div style={{
-                fontSize:   "13px",
-                background: data.trend === "rising" 
-                  ? "linear-gradient(135deg, #ef4444 0%, #f97316 100%)" 
-                  : data.trend === "falling"
-                  ? "linear-gradient(135deg, #10b981 0%, #34d399 100%)"
-                  : "rgba(148,163,184,0.3)",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                marginTop:  "10px",
-                fontWeight: "700",
-                letterSpacing: "0.02em"
-              }}>
-                {data.trend === "rising" && "↑ "} 
-                {data.trend === "falling" && "↓ "}
-                {data.trend === "stable" && "→ "}
-                {data.trendDelta > 0 && "+"}
-                {data.trendDelta} points in {data.trendPeriodHours}h
-              </div>
-            )}
           </div>
 
           {/* Category badge + health implication */}
-          <div style={{ flex: 1, minWidth: "250px" }}>
+          <div style={{ flex: 1, minWidth: "200px" }}>
             <div style={{
               display:      "inline-flex",
               alignItems:   "center",
-              gap:          "10px",
-              background:   `linear-gradient(135deg, ${level.color}25 0%, ${level.color}15 100%)`,
-              border:       `2px solid ${level.color}66`,
-              borderRadius: "12px",
-              padding:      "10px 18px",
-              marginBottom: "16px",
-              boxShadow: `0 4px 16px ${level.color}22`
+              gap:          "8px",
+              background:   `${level.color}22`,
+              border:       `1px solid ${level.color}66`,
+              borderRadius: "8px",
+              padding:      "8px 14px",
+              marginBottom: "12px"
             }}>
               <div style={{
-                width:        "12px",
-                height:       "12px",
+                width:        "10px",
+                height:       "10px",
                 borderRadius: "50%",
                 background:   level.color,
-                flexShrink:   0,
-                boxShadow: `0 0 12px ${level.color}88`,
-                animation: "pulse 2s ease-in-out infinite"
+                flexShrink:   0
               }} />
               <span style={{
-                fontSize:   "18px",
-                fontWeight: "800",
-                color:      level.color,
-                letterSpacing: "0.01em",
-                textShadow: `0 0 20px ${level.color}44`
+                fontSize:   "16px",
+                fontWeight: "700",
+                color:      level.color
               }}>
                 {data.category}
               </span>
@@ -303,9 +198,8 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
 
             <p style={{
               fontSize:   "14px",
-              color:      "var(--text-primary)",
-              lineHeight: "1.7",
-              marginBottom: "16px"
+              color:      "var(--text-muted)",
+              lineHeight: "1.6"
             }}>
               {data.advice?.healthImplication}
             </p>
@@ -313,75 +207,54 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
             {/* School advice — prominently shown when risky */}
             {data.aqi >= 200 && (
               <div style={{
-                padding:      "14px 16px",
-                background:   "linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(249,115,22,0.15) 100%)",
-                border:       "2px solid rgba(239,68,68,0.4)",
-                borderRadius: "12px",
-                fontSize:     "14px",
+                marginTop:    "12px",
+                padding:      "10px 14px",
+                background:   "rgba(239,68,68,0.1)",
+                border:       "1px solid rgba(239,68,68,0.3)",
+                borderRadius: "8px",
+                fontSize:     "13px",
                 color:        "#fca5a5",
-                lineHeight:   "1.6",
-                boxShadow: "0 4px 16px rgba(239,68,68,0.2)"
+                lineHeight:   "1.5"
               }}>
-                <div style={{ fontWeight: "700", marginBottom: "6px", color: "#ef4444" }}>
-                  🏫 SCHOOL ALERT
-                </div>
-                {data.advice?.schools}
+                🏫 <strong>School:</strong> {data.advice?.schools}
+              </div>
+            )}
+
+            {/* Why this matters for India */}
+            {data.aqi >= 150 && (
+              <div style={{
+                marginTop:    "12px",
+                padding:      "10px 14px",
+                background:   "rgba(16,185,129,0.06)",
+                border:       "1px solid rgba(16,185,129,0.2)",
+                borderRadius: "8px",
+                fontSize:     "12px",
+                color:        "var(--text-muted)",
+                lineHeight:   "1.5"
+              }}>
+                <strong style={{ color: "var(--text-primary)" }}>🇮🇳 Why alerts matter:</strong> In India, 
+                most schools don't close even at AQI 300+. Parents get no official warning. This is the gap 
+                AirGuard fills — giving you the alert <em>before</em> you send your child outside.
               </div>
             )}
           </div>
         </div>
 
-        {/* Why this matters for India - Enhanced */}
-        {data.aqi >= 150 && (
-          <div style={{
-            marginTop:    "20px",
-            padding:      "18px 20px",
-            background:   "linear-gradient(135deg, rgba(16,185,129,0.1) 0%, rgba(6,182,212,0.1) 100%)",
-            border:       "2px solid rgba(16,185,129,0.3)",
-            borderRadius: "14px",
-            fontSize:     "13px",
-            color:        "var(--text-primary)",
-            lineHeight:   "1.7",
-            boxShadow: "0 4px 16px rgba(16,185,129,0.15)"
-          }}>
-            <div style={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: "8px", 
-              marginBottom: "10px",
-              fontWeight: "700",
-              fontSize: "14px"
-            }}>
-              🇮🇳 <span className="gradient-text">Why AirGuard Matters in India</span>
-            </div>
-            <div style={{ color: "var(--text-muted)" }}>
-              In India, most schools <strong style={{ color: "#ef4444" }}>don't close even at AQI 300+</strong>. 
-              Parents get <strong>no official warning</strong>. Stubble burning, Diwali firecrackers, and 
-              winter smog cause AQI spikes of 3-5x higher than summer. <span style={{ color: "#34d399" }}>AirGuard fills 
-              this gap</span> — giving you the alert <em>before</em> you send your child outside.
-            </div>
-          </div>
-        )}
-
         {/* Dominant pollutant + timestamp */}
         <div style={{
-          marginTop:      "24px",
-          paddingTop:     "20px",
-          borderTop:      "1px solid rgba(148,163,184,0.2)",
+          marginTop:      "20px",
+          paddingTop:     "16px",
+          borderTop:      "1px solid var(--border)",
           display:        "flex",
           justifyContent: "space-between",
           alignItems:     "center",
           flexWrap:       "wrap",
-          gap:            "16px"
+          gap:            "12px"
         }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1 }}>
-            <span style={{ fontSize: "14px", color: "var(--text-muted)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", flex: 1 }}>
+            <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
               Dominant pollutant:{" "}
-              <strong style={{ 
-                color: level.color,
-                fontSize: "15px",
-                fontWeight: "700"
-              }}>
+              <strong style={{ color: "var(--text-primary)" }}>
                 {data.dominantPollutant || "—"}
               </strong>
             </span>
@@ -389,12 +262,11 @@ export default function AQICard({ data, loading, lastUpdated, onRefresh }) {
               <span style={{
                 display:    "flex",
                 alignItems: "center",
-                gap:        "6px",
-                fontSize:   "13px",
-                color:      "var(--text-dim)",
-                fontWeight: "500"
+                gap:        "4px",
+                fontSize:   "12px",
+                color:      "var(--text-muted)"
               }} title={`Last updated: ${lastUpdated?.toLocaleString('en-IN')}`}>
-                <Clock size={13} />
+                <Clock size={11} />
                 Updated {formattedTime}
                 {(() => {
                   if (!lastUpdated) return null;

@@ -29,7 +29,7 @@ const {
   BedrockRuntimeClient,
   InvokeModelCommand
 } = require("@aws-sdk/client-bedrock-runtime");
-const { getAQICategory } = require("/opt/nodejs/utils/aqi-utils");
+const { getAQICategory, getSeasonalContext } = require("/opt/nodejs/utils/aqi-utils");
 const { success, error, preflight, parseBody, getOrigin } = require("/opt/nodejs/utils/response-utils");
 
 const bedrockClient = new BedrockRuntimeClient({
@@ -99,7 +99,7 @@ async function callBedrock(prompt) {
 // ── Prompt Builder ────────────────────────────────────────────────────────────
 
 function buildPrompt(data) {
-  const { location, aqi, category, readings, userProfile, currentTime, trend, trendDelta, trendPeriodHours } = data;
+  const { location, aqi, category, readings, userProfile, currentTime } = data;
   const groups = userProfile?.groups || ["general"];
   const activity = userProfile?.activityPlanned || "general outdoor activity";
   const hasPurifier = userProfile?.hasAirPurifier || false;
@@ -124,36 +124,30 @@ function buildPrompt(data) {
     .map(g => groupDescriptions[g] || g)
     .join(", ");
 
-  // Build trend description
-  let trendInfo = "";
-  if (trend && trendPeriodHours > 0) {
-    const direction = trend === "rising" ? "risen" : trend === "falling" ? "fallen" : "remained stable";
-    const deltaText = trendDelta !== 0 ? ` by ${Math.abs(trendDelta)} points` : "";
-    trendInfo = `\n- Trend: AQI has ${direction}${deltaText} over the last ${trendPeriodHours} hour(s)`;
-    
-    if (trend === "rising" && trendDelta > 50) {
-      trendInfo += " ⚠️ RAPID INCREASE";
-    } else if (trend === "falling" && trendDelta < -50) {
-      trendInfo += " ✓ SIGNIFICANT IMPROVEMENT";
-    }
-  }
+  // Get India-specific seasonal context for pollution source explanation
+  const seasonal = getSeasonalContext();
 
   return `You are an air quality health advisor for India. Provide clear, practical, empathetic advice.
 
 Current air quality data for ${location}:
 - AQI: ${aqi} (${category} — Indian CPCB scale)
 - Pollutants: ${pollutantsInfo.length > 0 ? pollutantsInfo.join(", ") : "No detailed data"}
-- Time: ${currentTime || "unknown"}${trendInfo}
+- Time: ${currentTime || "unknown"}
 
 Person profile:
 - Vulnerable groups: ${groupText}
 - Planned activity: ${activity}
 - Has air purifier at home: ${hasPurifier ? "Yes" : "No"}
 
+Seasonal/calendar context for India right now:
+- Likely pollution cause: ${seasonal.cause}
+- Expected duration: ${seasonal.duration}
+- Is it temporary: ${seasonal.isTemporary ? "Yes" : "No — ongoing"}
+- Key note: ${seasonal.note}
+
 Please provide a response in this EXACT JSON format (no markdown, just JSON):
 {
   "summary": "2-sentence plain English summary of current conditions",
-  "forecast": "Based on the trend, what will happen in the next 2-3 hours (be specific about timing)",
   "immediateAction": "One clear sentence: what should this person do RIGHT NOW",
   "isOutdoorSafe": true or false,
   "safestTimeToGoOut": "e.g. 'After 6 PM when AQI typically drops' or 'Not today'",
@@ -162,7 +156,13 @@ Please provide a response in this EXACT JSON format (no markdown, just JSON):
   "indoorTips": ["tip 1", "tip 2"],
   "childrenAdvice": "Specific one-sentence advice for parents about sending children outside",
   "maskAdvice": "Whether and what type of mask is needed",
-  "whenToSeeDoctor": "Symptoms that should prompt a doctor visit"
+  "whenToSeeDoctor": "Symptoms that should prompt a doctor visit",
+  "whyHighToday": {
+    "cause": "One sentence explaining the specific reason AQI is elevated today",
+    "duration": "How long this situation is expected to last",
+    "isTemporary": true or false,
+    "actionNote": "One sentence on whether users should change long-term plans, not just today"
+  }
 }`;
 }
 
@@ -218,6 +218,15 @@ function getRuleBasedRecommendation(aqi, category, userProfile) {
       ? "N95 mask recommended for sensitive groups."
       : "N95 mask mandatory for everyone going outside.",
     whenToSeeDoctor: "Persistent cough, wheezing, chest tightness, shortness of breath, or eye irritation that doesn't improve indoors.",
+    whyHighToday: (() => {
+      const seasonal = getSeasonalContext();
+      return {
+        cause:       seasonal.cause,
+        duration:    seasonal.duration,
+        isTemporary: seasonal.isTemporary,
+        actionNote:  seasonal.note
+      };
+    })(),
     source: "rule-based"
   };
 }
@@ -272,9 +281,6 @@ exports.handler = async (event) => {
   const location    = body.location.trim().substring(0, 100);
   const userProfile = body.userProfile || { groups: ["general"] };
   const readings    = body.readings || {};
-  const trend       = body.trend || "stable";
-  const trendDelta  = body.trendDelta || 0;
-  const trendPeriodHours = body.trendPeriodHours || 0;
 
   const currentTime = new Intl.DateTimeFormat("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -286,10 +292,7 @@ exports.handler = async (event) => {
   let aiUsed = false;
 
   try {
-    const prompt = buildPrompt({ 
-      location, aqi, category, readings, userProfile, currentTime,
-      trend, trendDelta, trendPeriodHours 
-    });
+    const prompt = buildPrompt({ location, aqi, category, readings, userProfile, currentTime });
     const { text, model } = await callBedrock(prompt);
 
     // Parse JSON from Bedrock response — handle cases where model adds extra text

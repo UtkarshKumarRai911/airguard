@@ -9,6 +9,7 @@ import PollutantGrid from "./components/PollutantGrid";
 import UserProfileModal from "./components/UserProfileModal";
 import EmptyState   from "./components/EmptyState";
 import IndiaContextBanner from "./components/IndiaContextBanner";
+import PollutionContext from "./components/PollutionContext";
 import { useAQI }   from "./hooks/useAQI";
 
 export default function App() {
@@ -110,6 +111,13 @@ export default function App() {
                   loading={aiLoading}
                   aqi={aqiData?.aqi}
                 />
+              </div>
+            )}
+
+            {/* Pollution Source Context — Tier 2 improvement */}
+            {recommendation?.recommendation?.whyHighToday && aqiData?.aqi >= 150 && (
+              <div className="fade-in" style={{ animationDelay: "0.25s" }}>
+                <PollutionContext data={recommendation.recommendation.whyHighToday} />
               </div>
             )}
 

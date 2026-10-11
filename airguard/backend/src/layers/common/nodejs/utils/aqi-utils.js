@@ -210,6 +210,92 @@ function getTrendDescription(readings) {
   return "slightly changing";
 }
 
+// ── India Pollution Calendar ──────────────────────────────────────────────────
+
+// Diwali dates (update each year) — fireworks cause 3-5x AQI spikes
+const DIWALI_DATES = ["2026-10-20", "2026-10-21"];
+
+/**
+ * Returns context about the most likely pollution cause for the current
+ * date in India. Used by both AI Recommender and Scheduler (night forecast).
+ */
+function getSeasonalContext(date) {
+  const d = date || new Date();
+  const month = d.getMonth(); // 0 = Jan
+
+  // Check proximity to Diwali (within ±2 days)
+  const dateStr = d.toISOString().split("T")[0];
+  const nearDiwali = DIWALI_DATES.some(diwali => {
+    const diffDays = Math.abs(
+      (new Date(diwali).getTime() - d.getTime()) / 86400000
+    );
+    return diffDays <= 2;
+  });
+
+  if (nearDiwali) {
+    return {
+      cause:       "Diwali firecrackers",
+      risk:        "very_high",
+      duration:    "1–3 days",
+      isTemporary: true,
+      note:        "AQI spikes 3–5× on Diwali night. Worst between 10 PM and 3 AM. Clears within 48 hours."
+    };
+  }
+
+  // October–November: peak stubble burning season
+  if (month === 9 || month === 10) {
+    return {
+      cause:       "Stubble burning in Punjab and Haryana",
+      risk:        "high",
+      duration:    "3–4 weeks",
+      isTemporary: false,
+      note:        "Peak burning season. Northwest winds carry smoke toward Delhi and the IGP belt. Ongoing precautions needed."
+    };
+  }
+
+  // December–February: winter temperature inversion
+  if (month === 11 || month === 0 || month === 1) {
+    return {
+      cause:       "Winter temperature inversion",
+      risk:        "high",
+      duration:    "Day-specific (clears by afternoon)",
+      isTemporary: true,
+      note:        "Cold air traps pollutants near the ground during early morning hours. AQI typically improves after 11 AM as air warms."
+    };
+  }
+
+  // March–May: pre-monsoon heat and dust
+  if (month >= 2 && month <= 4) {
+    return {
+      cause:       "Pre-monsoon dust and vehicular emissions",
+      risk:        "medium",
+      duration:    "Seasonal (until monsoon arrives)",
+      isTemporary: false,
+      note:        "Dry, hot conditions lift road dust. Urban traffic emissions accumulate with low wind speeds."
+    };
+  }
+
+  // June–September: monsoon season — best air quality
+  if (month >= 5 && month <= 8) {
+    return {
+      cause:       "Urban emissions — reduced by monsoon rainfall",
+      risk:        "low",
+      duration:    "Seasonal (through monsoon)",
+      isTemporary: false,
+      note:        "Rain washes pollutants from the air. This is the lowest-AQI period of the year in most Indian cities."
+    };
+  }
+
+  // Fallback (shouldn't reach here, but safe default)
+  return {
+    cause:       "Urban vehicular and industrial emissions",
+    risk:        "medium",
+    duration:    "Ongoing",
+    isTemporary: false,
+    note:        "Year-round urban baseline pollution from traffic and industry."
+  };
+}
+
 /**
  * Validate and sanitize a location string
  */
@@ -266,6 +352,7 @@ module.exports = {
   sanitizeLocation,
   buildAQIResponse,
   calculateSubIndex,
+  getSeasonalContext,
   PM25_BREAKPOINTS,
   PM10_BREAKPOINTS,
   AQI_CATEGORIES
