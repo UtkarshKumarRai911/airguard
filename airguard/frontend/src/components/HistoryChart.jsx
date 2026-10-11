@@ -54,14 +54,14 @@ export default function HistoryChart({ data, loading, location }) {
   const chartData = [...data]
     .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
     .map(d => ({
-      time: new Date(d.timestamp).toLocaleTimeString("en-IN", {
-        hour: "2-digit", minute: "2-digit", hour12: true
+      time: new Date(d.timestamp).toLocaleDateString("en-IN", {
+        month: "short", day: "numeric", hour: "2-digit"
       }),
       aqi: d.aqi
     }));
 
-  // Show every 4th label to avoid crowding
-  const tickInterval = Math.max(1, Math.floor(chartData.length / 8));
+  // Show fewer labels for 7-day view
+  const tickInterval = Math.max(1, Math.floor(chartData.length / 12));
 
   return (
     <div style={{
@@ -76,10 +76,10 @@ export default function HistoryChart({ data, loading, location }) {
         color:       "var(--text-primary)",
         marginBottom: "4px"
       }}>
-        24-Hour AQI History
+        7-Day AQI History
       </h2>
       <p style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "16px" }}>
-        {location} — last {data.length} readings
+        {location} — last {data.length} readings over 7 days
       </p>
 
       <ResponsiveContainer width="100%" height={180}>

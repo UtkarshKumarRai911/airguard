@@ -21,10 +21,22 @@ export default function Header({ onOpenProfile, userProfile }) {
         alignItems:    "center",
         justifyContent: "space-between"
       }}>
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+        {/* Logo - clickable to refresh/reset */}
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            padding: "4px"
+          }}
+          aria-label="Go to home page"
+        >
           <span style={{ fontSize: "22px" }}>🌿</span>
-          <div>
+          <div style={{ textAlign: "left" }}>
             <h1 style={{
               fontSize:   "18px",
               fontWeight: "700",
@@ -37,7 +49,7 @@ export default function Header({ onOpenProfile, userProfile }) {
               Know before you breathe
             </p>
           </div>
-        </div>
+        </button>
 
         {/* Right side */}
         <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>

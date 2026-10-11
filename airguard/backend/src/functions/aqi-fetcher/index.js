@@ -209,10 +209,10 @@ async function getHistory(locationKey) {
       { ":lk": locationKey },
       "LocationFetchedAtIndex"  // GSI: locationKey (PK) + fetchedAt (SK)
     );
-    // Return last 24 data points sorted by time
+    // Return last 7 days of data points (336 data points at 30-min intervals)
     return items
       .sort((a, b) => new Date(b.fetchedAt) - new Date(a.fetchedAt))
-      .slice(0, 48)  // 48 × 30min = 24 hours
+      .slice(0, 336)  // 336 × 30min = 7 days
       .map(i => ({
         aqi:       i.aqi,
         category:  i.category,
