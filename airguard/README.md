@@ -418,3 +418,4 @@ MIT — see [LICENSE](LICENSE)
 *Built with ❤️ and too much coffee during the WeMakeDevs × AWS Environmental Hacks hackathon.*
 *Powered by AWS Lambda · API Gateway · DynamoDB · Bedrock · SNS · Amplify · EventBridge*
 "# Updated" 
+"# Rebuild" 
